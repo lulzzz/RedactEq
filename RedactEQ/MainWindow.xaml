@@ -1,0 +1,281 @@
+﻿<Window x:Class="RedactEQ.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:RedactEQ"
+        xmlns:videotools="clr-namespace:VideoTools"
+        mc:Ignorable="d"
+        Closing="Window_Closing"
+        Icon="Images/Logo.png"
+        Title="Equature Redaction Tool" Height="500" Width="825">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="100"/>          
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="24"/>
+        </Grid.RowDefinitions>
+
+
+        <Ribbon Grid.Row="0" Margin="0,-22,0,0" x:Name="MainRibbon" SelectionChanged="MainRibbon_SelectionChanged" SelectedIndex="{Binding activeTabIndex}" >
+            <Ribbon.ApplicationMenu>
+                <RibbonApplicationMenu SmallImageSource="Images/camera.png">
+
+                    <RibbonApplicationMenuItem x:Name="OpenItem" Header="Open" ImageSource="Images/open-folder.png"
+                                               Click="OpenItem_Click"/>
+
+                    <RibbonApplicationMenuItem x:Name="ExportItem" Header="Export" ImageSource="Images/export.png"
+                                               Click="ExportItem_Click"/>
+
+                    <RibbonApplicationMenuItem x:Name="ExitItem" Header="Exit" ImageSource="Images/exit.png"
+                                               Click="ExitItem_Click"/>
+                    
+                    
+
+                </RibbonApplicationMenu>
+            </Ribbon.ApplicationMenu>
+
+            <RibbonTab x:Name="AutoRibbonTab" Header="Auto" >
+
+                <!--<RibbonTab.Style>
+                    <Style TargetType="{x:Type RibbonTab}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding state}" 
+                                         Value="{x:Static local:AppState.MP4_NOT_SET}">
+                                <Setter Property="IsEnabled" Value="True"/>
+                            </DataTrigger>                            
+                        </Style.Triggers>
+                    </Style>
+                </RibbonTab.Style>-->
+
+                <RibbonGroup>
+                    <RibbonButton x:Name="AutoRibbonRedactAllPB" LargeImageSource="Images/redact.png"
+                                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                    <RibbonButton x:Name="AutoRedactFromCurrentPB" LargeImageSource="Images/redact.png"
+                                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                </RibbonGroup>
+            </RibbonTab>
+
+            <RibbonTab x:Name="ManualRibbonTab" Header="Manual">
+                
+                <RibbonGroup Header="Mode">
+                    <ToggleButton x:Name="TrackPB" Click="TrackPB_Click" IsThreeState="True" IsChecked="{Binding trackingEnabled}"
+                                  HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                        <ToggleButton.Content>
+                            <Image Source="Images/target.png" />
+                        </ToggleButton.Content>
+                        <ToggleButton.Style>
+                            <Style TargetType="{x:Type ToggleButton}">
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border BorderBrush="{TemplateBinding BorderBrush}" Background="{TemplateBinding Background}">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter Property="Background" Value="Red" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ToggleButton.Style>
+
+                    </ToggleButton>
+                </RibbonGroup>
+
+                <RibbonGroup Width="100">
+                    
+                </RibbonGroup>
+
+                <RibbonGroup Header="Navigation">
+
+                    <Grid x:Name="ControlButtonGrid" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Button Grid.Column="0" x:Name="PrevFastPB" Width="32" Height="32" Margin="8,4,8,4"                     
+                    Click="PrevFastPB_Click">
+                            <Button.Content>
+                                <Image Width="24" Height="24" Stretch="Uniform" Source="Images/fast_rewind.png"/>
+                            </Button.Content>
+                        </Button>
+                        <Button Grid.Column="1" x:Name="PrevPB"     Width="32" Height="32" Margin="8,4,8,4" 
+                    Click="PrevPB_Click">
+                            <Button.Content>
+                                <Image Width="24" Height="24" Stretch="Uniform" Source="Images/back.png"/>
+                            </Button.Content>
+                        </Button>
+                        <Button Grid.Column="2" x:Name="ForwPB"     Width="32" Height="32" Margin="8,4,8,4" 
+                    Click="ForwPB_Click">
+                            <Button.Content>
+                                <Image Width="24" Height="24" Stretch="Uniform" Source="Images/play.png"/>
+                            </Button.Content>
+                        </Button>
+                        <Button Grid.Column="3" x:Name="ForwFastPB" Width="32" Height="32" Margin="8,4,8,4" 
+                    Click="ForwFastPB_Click">
+                            <Button.Content>
+                                <Image Width="24" Height="24" Stretch="Uniform" Source="Images/fast_forward.png"/>
+                            </Button.Content>
+                        </Button>
+
+                    </Grid>
+
+                </RibbonGroup>
+                
+            </RibbonTab>
+
+            <RibbonTab x:Name="PlayerRibbonTab" Header="Player">
+                <RibbonGroup>
+                    <RibbonButton x:Name="PlayerRibbon_PlayPB" Content="Play" LargeImageSource="Images/play.png"
+                                  IsEnabled="False"
+                                  Width="100" Height="60" Click="Player_PlayPB_Click"/>
+                    <RibbonButton x:Name="PlayerRibbon_PausePB" Content="Pause" LargeImageSource="Images/pause.png"
+                                  IsEnabled="False"
+                                  Width="100" Height="60" Click="Player_PausePB_Click"/>
+                    <RibbonButton x:Name="PlayerRibbon_StopPB" Content="Stop" LargeImageSource="Images/stop.png"
+                                  IsEnabled="False"
+                                  Width="100" Height="60" Click="Player_StopPB_Click"/>
+                </RibbonGroup>
+            </RibbonTab>
+
+  
+
+        </Ribbon>
+
+
+        <TabControl Grid.Row="1" x:Name="MainTabControl" SelectedIndex="{Binding activeTabIndex}" >
+            
+            
+            <TabItem x:Name="AutoTab" Visibility="Collapsed">
+                
+            </TabItem>
+
+            <TabItem x:Name="ManualTab" Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+
+                    <Grid Grid.Row="0" x:Name="GOP_ListView_Grid">
+                        <ListView x:Name="GOP_ListView" Grid.Row="0"
+                    ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Auto"                                            
+                    ItemsSource="{Binding gopList}" SelectedItem="{Binding selectedGOP}"    
+                    SelectionChanged="GOP_ListView_SelectionChanged"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Vertical" Margin="5,0">
+                                        <Image Source="{Binding bitmap}" Height="64"                                                      
+                                                       Stretch="Uniform" StretchDirection="Both"/>
+                                        <TextBlock Height="18" Text="{Binding timestampStr}"
+                                                           TextAlignment="Center"
+                                                           HorizontalAlignment="Stretch" VerticalAlignment="Bottom" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+
+                    <Grid Grid.Row="1" x:Name="SplitVideoGrid">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="5"/>
+                            <ColumnDefinition Width="100"/>
+                        </Grid.ColumnDefinitions>
+
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Timestamp" 
+                       HorizontalAlignment="Center" VerticalAlignment="Bottom" FontSize="18"  />
+
+
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="" 
+                       HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="18" />
+
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding timestampStr}" 
+                       HorizontalAlignment="Right" VerticalAlignment="Bottom" FontSize="18"  />
+
+
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding redactions.Count}" 
+                       HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="18" />
+
+
+                        <Grid x:Name="ManualVideoGrid" Grid.Row="1" Grid.Column="0" Background="Black"
+                              MouseWheel="ManualVideoGrid_MouseWheel">
+                            <Image x:Name="ManualImage" Stretch="Uniform" Source="{Binding manualImage}"/>
+                            <Image x:Name="ManualOverlay" Stretch="Uniform"  Source="{Binding manualOverlay}"
+                               MouseLeftButtonDown="ManualOverlay_MouseLeftButtonDown"
+                               MouseLeftButtonUp="ManualOverlay_MouseLeftButtonUp"
+                               MouseLeave="ManualOverlay_MouseLeave"
+                               MouseMove="ManualOverlay_MouseMove"
+                               MouseRightButtonUp="ManualOverlay_MouseRightButtonUp"
+                               />       
+                        </Grid>
+
+                        <GridSplitter Grid.Row="0" Grid.Column="1" Grid.RowSpan="2" HorizontalAlignment="Stretch"/>
+
+                        <ListView x:Name="FrameEditsListBox" Grid.Row="1" Grid.Column="2" ItemsSource="{Binding redactions}"
+                                  SelectionChanged="RedactionListBox_SelectionChanged"
+                                  SelectedItem="{Binding selectedRedaction}">
+                            <ListView.InputBindings>
+                                <KeyBinding Key="Delete" Command="{Binding Path=deleteRedactionCommand}"></KeyBinding>
+                            </ListView.InputBindings>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">                                        
+                                        <TextBlock Text="{Binding box.x1}"/>
+                                        <TextBlock Text=","/>
+                                        <TextBlock Text="{Binding box.y1}"/>
+                                        <TextBlock Text=","/>
+                                        <TextBlock Text="{Binding box.x2}"/>
+                                        <TextBlock Text=","/>
+                                        <TextBlock Text="{Binding box.y2}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+
+                    </Grid>
+
+
+                </Grid>
+                
+            </TabItem>
+
+            <TabItem x:Name="PlayerTab" Visibility="Collapsed">
+
+                <Image x:Name="PlayerDisplayImage" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                       Stretch="Uniform" Source="{Binding playerBitmap}"/>
+
+
+            </TabItem>
+
+            
+            
+        </TabControl>
+
+        <videotools:VideoNavigator Grid.Row="2" x:Name="videoNavigator"
+              HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+
+    </Grid>
+</Window>
