@@ -224,6 +224,16 @@ namespace VideoTools
         }
 
 
+        public void AddRedactionBoxesFromDNN(List<DNNTools.BoundingBox> boxList, double timestamp, int imageWidth, int imageHeight)
+        {
+            foreach (DNNTools.BoundingBox box in boxList)
+            {
+                VideoTools.BoundingBox bbox = new VideoTools.BoundingBox((int)(box.x1 * imageWidth), (int)(box.y1 * imageHeight), (int)(box.x2 * imageWidth), (int)(box.y2 * imageHeight));
+                AddFrameEdit(timestamp, FRAME_EDIT_TYPE.REDACTION, bbox);
+            }
+        }
+
+
         public bool SaveDatabase()
         {
             bool success = true;

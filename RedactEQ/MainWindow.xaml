@@ -36,24 +36,18 @@
                 </RibbonApplicationMenu>
             </Ribbon.ApplicationMenu>
 
-            <RibbonTab x:Name="AutoRibbonTab" Header="Auto" >
+            <RibbonTab x:Name="AutoRedactRibbonTab" Header="Auto" >
 
-                <!--<RibbonTab.Style>
-                    <Style TargetType="{x:Type RibbonTab}">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding state}" 
-                                         Value="{x:Static local:AppState.MP4_NOT_SET}">
-                                <Setter Property="IsEnabled" Value="True"/>
-                            </DataTrigger>                            
-                        </Style.Triggers>
-                    </Style>
-                </RibbonTab.Style>-->
-
-                <RibbonGroup>
-                    <RibbonButton x:Name="AutoRibbonRedactAllPB" LargeImageSource="Images/redact.png"
-                                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                    <RibbonButton x:Name="AutoRedactFromCurrentPB" LargeImageSource="Images/redact.png"
-                                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                <RibbonGroup LargeImageSource="Images/redact.png">
+                    <RibbonButton x:Name="AutoRedactRibbon_PlayPB" Content="Play" LargeImageSource="Images/play.png"
+                                  IsEnabled="False"
+                                  Width="100" Height="60" Click="AutoRedactRibbon_PlayPB_Click"/>
+                    <RibbonButton x:Name="AutoRedactRibbon_PausePB" Content="Pause" LargeImageSource="Images/pause.png"
+                                  IsEnabled="False"
+                                  Width="100" Height="60" Click="AutoRedactRibbon_PausePB_Click"/>
+                    <RibbonButton x:Name="AutoRedactRibbon_StopPB" Content="Stop" LargeImageSource="Images/stop.png"
+                                  IsEnabled="False"
+                                  Width="100" Height="60" Click="AutoRedactRibbon_StopPB_Click"/>
                 </RibbonGroup>
             </RibbonTab>
 
@@ -155,7 +149,19 @@
             
             
             <TabItem x:Name="AutoTab" Visibility="Collapsed">
-                
+
+                <Grid x:Name="AutoVideoGrid" Grid.Row="1" Grid.Column="0" Background="Black">
+                    <Image x:Name="AutoImage" Stretch="Uniform" Source="{Binding autoImage}"/>
+                    <Image x:Name="AutoOverlay" Stretch="Uniform"  Source="{Binding autoOverlay}"
+                               MouseLeftButtonDown="AutoOverlay_MouseLeftButtonDown"
+                               MouseLeftButtonUp="AutoOverlay_MouseLeftButtonUp"
+                               MouseLeave="AutoOverlay_MouseLeave"
+                               MouseMove="AutoOverlay_MouseMove"
+                               />
+                </Grid>
+
+
+
             </TabItem>
 
             <TabItem x:Name="ManualTab" Visibility="Collapsed">

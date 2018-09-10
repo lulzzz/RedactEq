@@ -10,14 +10,14 @@ namespace VideoTools
 {
     public struct ProgressStruct
     {
-        public long timestamp;  // current frame position within video (milliseconds)
+        public double timestamp;  // current frame position within video (milliseconds)
         public long length;    // total length of video (milliseconds)
 
         public byte[] data;
         public bool key;
         public int width;
         public int height;
-        public ProgressStruct(long tstamp, long leng, byte[] imageData, bool isKeyFrame, int w, int h)
+        public ProgressStruct(double tstamp, long leng, byte[] imageData, bool isKeyFrame, int w, int h)
         {
             timestamp = tstamp;
             length = leng;

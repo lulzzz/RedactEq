@@ -37,7 +37,7 @@ namespace RedactEQ
         TaskScheduler m_uiTask;
         int m_analysisWidth, m_analysisHeight;
 
-        ITargetBlock<Tuple<byte[], int, int, int, WriteableBitmap, bool, bool>> m_pipeline;
+        ITargetBlock<Tuple<byte[], double, int, int, int, WriteableBitmap, bool>> m_pipeline;
 
         VideoEditsDatabase m_editsDB;
         int m_currentFrameIndex;
@@ -104,7 +104,7 @@ namespace RedactEQ
 
                     m_cancelTokenSource = new CancellationTokenSource();
 
-                    m_pipeline = m_engine.CreateDNNPipeline(modelFile, classes, m_analysisWidth, m_analysisHeight, TFDataType.UInt8, 0.50f, null,null,
+                    m_pipeline = m_engine.CreateDNNPipeline(modelFile, classes, m_editsDB, m_analysisWidth, m_analysisHeight, TFDataType.UInt8, 0.50f, null,null,
                                                             m_uiTask, m_cancelTokenSource.Token);
                 }
                 else
@@ -167,13 +167,17 @@ namespace RedactEQ
                 byte[] data;
                 if(m_videoCache.GetFrame(0, out timestamp, out width, out height, out depth, out data))
                 {
-                    Update(timestamp, width, height, depth, data);
+                    Update_Manual(timestamp, width, height, depth, data);
 
                     m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes();
+                    m_vm.RedrawRedactionBoxes_Manual();
+
+                    Update_Auto(timestamp, width, height, depth, data);
+                    m_vm.RedrawRedactionBoxes_Auto();
                 }
 
                 PlayerRibbon_PlayPB.IsEnabled = true;
+                AutoRedactRibbon_PlayPB.IsEnabled = true;
 
                 m_vm.state = AppState.READY;
 
@@ -213,7 +217,7 @@ namespace RedactEQ
         private void ManualOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {            
             m_dragging = true;
-            m_p1 = ConvertToOverlayPosition(e.GetPosition(ManualOverlay));
+            m_p1 = ConvertToOverlayPosition(e.GetPosition(ManualOverlay), ManualImage, m_vm.manualOverlay);
             m_p2 = m_p1;                        
         }
 
@@ -226,7 +230,7 @@ namespace RedactEQ
             if (m_editsDB != null)
                 m_editsDB.AddFrameEdit(m_vm.timestamp, FRAME_EDIT_TYPE.REDACTION, new VideoTools.BoundingBox(x1,y1,x2,y2));
 
-            m_vm.RedrawRedactionBoxes();
+            m_vm.RedrawRedactionBoxes_Manual();
                 
         }
 
@@ -236,10 +240,10 @@ namespace RedactEQ
             {
                 int x1, x2, y1, y2;
 
-                m_vm.RedrawRedactionBoxes();
+                m_vm.RedrawRedactionBoxes_Manual();
 
                 // draw new (the one we're dragging that is not yet in the collection)
-                m_p2 = ConvertToOverlayPosition(e.GetPosition(ManualOverlay));
+                m_p2 = ConvertToOverlayPosition(e.GetPosition(ManualOverlay), ManualImage, m_vm.manualOverlay);
                 GetDrawPoints(out x1, out y1, out x2, out y2);
                 m_vm.manualOverlay.FillRectangle(x1, y1, x2, y2, m_vm.fillColor);
                 //m_vm.manualOverlay.DrawRectangle(x1+1, y1+1, x2-1, y2-1, Colors.Red);
@@ -261,7 +265,7 @@ namespace RedactEQ
 
         private void ManualOverlay_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
         {
-            Point pt = ConvertToOverlayPosition(e.GetPosition(ManualOverlay));
+            Point pt = ConvertToOverlayPosition(e.GetPosition(ManualOverlay), ManualImage, m_vm.manualOverlay);
 
             foreach(FrameEdit fe in m_vm.redactions)
             {
@@ -274,18 +278,67 @@ namespace RedactEQ
                 }
             }
 
-            m_vm.RedrawRedactionBoxes();
+            m_vm.RedrawRedactionBoxes_Manual();
         }
 
 
 
-        public Point ConvertToOverlayPosition(Point p)
+        private void AutoOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            double windowSizeX = ManualOverlay.ActualWidth;
-            double windowSizeY = ManualOverlay.ActualHeight;
+            m_dragging = true;
+            m_p1 = ConvertToOverlayPosition(e.GetPosition(AutoOverlay), AutoImage, m_vm.autoOverlay);
+            m_p2 = m_p1;
+        }
 
-            int x = (int)(p.X * m_vm.manualOverlay.Width / windowSizeX);
-            int y = (int)(p.Y * m_vm.manualOverlay.Height / windowSizeY);
+        private void AutoOverlay_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            m_dragging = false;
+            int x1, x2, y1, y2;
+            GetDrawPoints(out x1, out y1, out x2, out y2);
+
+            if (m_editsDB != null)
+                m_editsDB.AddFrameEdit(m_vm.timestamp, FRAME_EDIT_TYPE.REDACTION, new VideoTools.BoundingBox(x1, y1, x2, y2));
+            
+            m_vm.RedrawRedactionBoxes_Auto();
+
+        }
+
+        private void AutoOverlay_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (m_dragging)
+            {
+                int x1, x2, y1, y2;
+
+                m_vm.RedrawRedactionBoxes_Auto();
+
+                // draw new (the one we're dragging that is not yet in the collection)
+                m_p2 = ConvertToOverlayPosition(e.GetPosition(AutoOverlay), AutoImage, m_vm.autoOverlay);
+                GetDrawPoints(out x1, out y1, out x2, out y2);
+                m_vm.autoOverlay.FillRectangle(x1, y1, x2, y2, m_vm.fillColor);            
+            }
+        }
+
+        private void AutoOverlay_MouseLeave(object sender, MouseEventArgs e)
+        {
+            if (m_dragging)
+            {
+                m_vm.autoOverlay.Clear();
+                Int32Rect rect = new Int32Rect(0, 0, (int)m_vm.autoOverlay.Width, (int)m_vm.autoOverlay.Height);
+            }
+
+            m_dragging = false;
+        }
+
+
+
+
+        public Point ConvertToOverlayPosition(Point p, Image image, WriteableBitmap bitmap)
+        {
+            double windowSizeX = image.ActualWidth;
+            double windowSizeY = image.ActualHeight;
+
+            int x = (int)(p.X * bitmap.Width / windowSizeX);
+            int y = (int)(p.Y * bitmap.Height / windowSizeY);
 
             return new Point((double)x, (double)y);
         }
@@ -333,7 +386,7 @@ namespace RedactEQ
                     m_vm.timestamp = timestamp;
 
                     m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes();
+                    m_vm.RedrawRedactionBoxes_Manual();
                 }
             }            
         }
@@ -355,7 +408,7 @@ namespace RedactEQ
                     m_vm.timestamp = timestamp;
 
                     m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes();
+                    m_vm.RedrawRedactionBoxes_Manual();
                 }
             }
         }
@@ -379,7 +432,7 @@ namespace RedactEQ
                     m_vm.timestamp = timestamp;
 
                     m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes();
+                    m_vm.RedrawRedactionBoxes_Manual();
                 }
             }
         }
@@ -404,7 +457,7 @@ namespace RedactEQ
                     m_vm.timestamp = timestamp;
 
                     m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes();
+                    m_vm.RedrawRedactionBoxes_Manual();
                 }
             }
         }
@@ -625,13 +678,17 @@ namespace RedactEQ
             }
         }
 
-        private void Update(double timestamp, int width, int height, int depth, byte[] data)
+        private void Update_Manual(double timestamp, int width, int height, int depth, byte[] data)
         {
             m_vm.SetManualImage(width, height, depth, data);
             m_vm.timestamp = timestamp;
         }
 
-
+        private void Update_Auto(double timestamp, int width, int height, int depth, byte[] data)
+        {
+            m_vm.SetAutoImage(width, height, depth, data);
+            m_vm.timestamp = timestamp;
+        }
 
         private void MainRibbon_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -745,13 +802,10 @@ namespace RedactEQ
 
         private void RedactionListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            m_vm.RedrawRedactionBoxes();
+            m_vm.RedrawRedactionBoxes_Manual();
         }
-        
-        private void TrackPB_Click(object sender, RoutedEventArgs e)
-        {
 
-        }
+     
 
         private void Player_StopPB_Click(object sender, RoutedEventArgs e)
         {
@@ -768,7 +822,131 @@ namespace RedactEQ
 
             videoNavigator.CurrentValue = 0;
         }
-        
+
+
+
+
+
+        public void Redaction_Start(string filename, int decodeWidth, int decodeHeight, bool paceOutput)
+        {
+            VideoTools.Mp4Reader mp4Reader = new VideoTools.Mp4Reader();
+            m_cancelTokenSource = new CancellationTokenSource();
+            m_pauseTokenSource = new WPFTools.PauseTokenSource();
+            m_pauseTokenSource.IsPaused = false;
+            mp4Reader.StartPlayback(filename, NewFrame_to_Redact, decodeWidth, decodeHeight,
+                m_cancelTokenSource, m_pauseTokenSource, paceOutput);
+        }
+
+
+
+        public void NewFrame_to_Redact(VideoTools.ProgressStruct frame)
+        {
+            if (frame.timestamp == -1)
+            {
+                AutoRedactRibbon_StopPB_Click(null, null);
+            }
+            else
+            {
+                // handle new frame coming in
+                //BitmapSource bs = BitmapSource.Create(frame.width, frame.height, 96, 96,
+                //                PixelFormats.Bgr24, null, frame.data, frame.width * 3);
+
+                //m_vm.autoImage = new WriteableBitmap(bs);
+
+                double percentDone = (double)frame.timestamp / (double)frame.length * 100.0f;
+                videoNavigator.CurrentValue = percentDone;
+
+
+                // submit frame to DNN
+
+                if(m_vm.autoImage.PixelWidth != frame.width || m_vm.autoImage.PixelHeight != frame.height)
+                {
+                    m_vm.autoImage = BitmapFactory.New(frame.width, frame.height);
+                }
+                m_pipeline.Post(Tuple.Create<byte[], double, int, int, int, WriteableBitmap, bool>(frame.data, frame.timestamp, frame.width, frame.height, 3,
+                                                                                           m_vm.autoImage, false));
+            }
+        }
+
+
+        private void AutoRedactRibbon_PlayPB_Click(object sender, RoutedEventArgs e)
+        {
+            switch (m_vm.state)
+            {
+                case AppState.REDACTION_PAUSED:
+                    m_pauseTokenSource.IsPaused = false;
+
+                    AutoRedactRibbon_PlayPB.IsEnabled = false;
+                    AutoRedactRibbon_PausePB.IsEnabled = true;
+                    AutoRedactRibbon_StopPB.IsEnabled = true;
+
+                    m_vm.state = AppState.REDACTION_RUNNING;
+                    break;
+                case AppState.READY: // player stopped
+                    if (m_vm.mp4Filename != null)
+                        if (File.Exists(m_vm.mp4Filename))
+                        {
+                            Redaction_Start(m_vm.mp4Filename, 640, 480, false);
+
+                            AutoRedactRibbon_PlayPB.IsEnabled = false;
+                            AutoRedactRibbon_PausePB.IsEnabled = true;
+                            AutoRedactRibbon_StopPB.IsEnabled = true;
+
+                            m_vm.state = AppState.REDACTION_RUNNING;
+                            m_pauseTokenSource.IsPaused = false;
+                        }
+                    break;
+            }
+        }
+
+        private void AutoRedactRibbon_PausePB_Click(object sender, RoutedEventArgs e)
+        {
+            switch (m_vm.state)
+            {
+                case AppState.REDACTION_PAUSED:
+                    m_pauseTokenSource.IsPaused = false;
+
+                    AutoRedactRibbon_PlayPB.IsEnabled = false;
+                    AutoRedactRibbon_PausePB.IsEnabled = true;
+                    AutoRedactRibbon_StopPB.IsEnabled = true;
+
+                    m_vm.state = AppState.REDACTION_RUNNING;
+                    break;
+                case AppState.REDACTION_RUNNING:
+                    m_pauseTokenSource.IsPaused = true;
+
+                    AutoRedactRibbon_PlayPB.IsEnabled = true;
+                    AutoRedactRibbon_PausePB.IsEnabled = false;
+                    AutoRedactRibbon_StopPB.IsEnabled = true;
+
+                    m_vm.state = AppState.REDACTION_PAUSED;
+                    break;
+            }
+        }
+
+        private void AutoRedactRibbon_StopPB_Click(object sender, RoutedEventArgs e)
+        {
+            m_pauseTokenSource.IsPaused = false;
+            m_cancelTokenSource.Cancel();
+
+            AutoRedactRibbon_PlayPB.IsEnabled = true;
+            AutoRedactRibbon_PausePB.IsEnabled = false;
+            AutoRedactRibbon_StopPB.IsEnabled = false;
+
+            m_vm.state = AppState.READY;
+
+            m_vm.autoImage.Clear();
+            m_vm.autoOverlay.Clear();
+
+            videoNavigator.CurrentValue = 0;
+        }
+
+
+        private void TrackPB_Click(object sender, RoutedEventArgs e)
+        {
+
+        }
+
 
         #endregion
 
@@ -782,7 +960,9 @@ namespace RedactEQ
         MP4_NOT_SET,
         READY,        
         PLAYER_PAUSED,
-        PLAYER_PLAYING
+        PLAYER_PLAYING,
+        REDACTION_PAUSED,
+        REDACTION_RUNNING
     }
 
 
@@ -896,6 +1076,31 @@ namespace RedactEQ
             }
         }
 
+
+
+        private WriteableBitmap _autoImage;
+        public WriteableBitmap autoImage
+        {
+            get { return _autoImage; }
+            set
+            {
+                _autoImage = value; if (PropertyChanged != null)
+                    PropertyChanged(this, new PropertyChangedEventArgs("autoImage"));
+            }
+        }
+
+        private WriteableBitmap _autoOverlay;
+        public WriteableBitmap autoOverlay
+        {
+            get { return _autoOverlay; }
+            set
+            {
+                _autoOverlay = value; if (PropertyChanged != null)
+                    PropertyChanged(this, new PropertyChangedEventArgs("autoOverlay"));
+            }
+        }
+
+
         private WriteableBitmap _manualImage;
         public WriteableBitmap manualImage
         {
@@ -903,7 +1108,6 @@ namespace RedactEQ
             set { _manualImage = value; if (PropertyChanged != null)
                     PropertyChanged(this, new PropertyChangedEventArgs("manualImage")); }
         }
-
 
         private WriteableBitmap _manualOverlay;
         public WriteableBitmap manualOverlay
@@ -976,13 +1180,15 @@ namespace RedactEQ
         public void DeleteSelectedRedaction(object obj)
         {
             redactions.Remove(selectedRedaction);
-            RedrawRedactionBoxes();
+            RedrawRedactionBoxes_Manual();
+            RedrawRedactionBoxes_Auto();
         }
 
         public void DeleteAnnotation(FrameEdit redaction)
         {
             redactions.Remove(redaction);
-            RedrawRedactionBoxes();
+            RedrawRedactionBoxes_Manual();
+            RedrawRedactionBoxes_Auto();
         }
 
         private Color _fillColor;
@@ -1000,20 +1206,31 @@ namespace RedactEQ
         }
 
 
-        public void RedrawRedactionBoxes()
+        public void RedrawRedactionBoxes_Manual()
         {
             manualOverlay.Clear();
 
             foreach (FrameEdit fe in redactions)
             {
-                //manualOverlay.DrawRectangle(fe.box.x1,fe.box.y1, fe.box.x2, fe.box.y2, Colors.Red);
-                //manualOverlay.DrawRectangle(fe.box.x1+1, fe.box.y1+1, fe.box.x2-1, fe.box.y2-1, Colors.Red);
-
                 if(fe == selectedRedaction)
                     manualOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, selectedFillColor);
                 else
                     manualOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, fillColor);
+            }
+        }
 
+
+
+        public void RedrawRedactionBoxes_Auto()
+        {
+            autoOverlay.Clear();
+
+            foreach (FrameEdit fe in redactions)
+            {               
+                if (fe == selectedRedaction)
+                    autoOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, selectedFillColor);
+                else
+                    autoOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, fillColor);
             }
         }
 
@@ -1041,10 +1258,38 @@ namespace RedactEQ
 
 
 
-   //////////////////////////////////////////////////////////////////////////////////////////////////
-   // player members
-   
-           
+        public void SetAutoImage(int Width, int Height, int Depth, byte[] data)
+        {
+            if (autoImage != null)
+            {
+                if (Width != autoImage.PixelWidth || Height != autoImage.PixelHeight)
+                {
+                    PixelFormat pf = PixelFormats.Bgr24;
+                    if (depth > 3) pf = PixelFormats.Bgra32;
+                    autoImage = new WriteableBitmap(width, height, 96, 96, pf, null);
+                    autoOverlay = BitmapFactory.New(width, height);
+                }
+            }
+            else
+            {
+                PixelFormat pf = PixelFormats.Bgr24;
+                if (depth > 3) pf = PixelFormats.Bgra32;
+                autoImage = new WriteableBitmap(width, height, 96, 96, pf, null);
+                autoOverlay = BitmapFactory.New(width, height);
+            }
+
+            autoOverlay.Clear();
+            Int32Rect rect = new Int32Rect(0, 0, autoImage.PixelWidth, autoImage.PixelHeight);
+            autoImage.Lock();
+            autoImage.WritePixels(rect, data, autoImage.PixelWidth * depth, 0);
+            autoImage.Unlock();
+        }
+
+
+        //////////////////////////////////////////////////////////////////////////////////////////////////
+        // player members
+
+
         private WriteableBitmap _playerBitmap;
         public WriteableBitmap playerBitmap
         {
