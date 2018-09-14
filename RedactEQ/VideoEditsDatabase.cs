@@ -3,17 +3,14 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows;
 
 namespace VideoTools
 {
     public enum FRAME_EDIT_TYPE
     {
-        REDACTION,
-        TRACKING
+        AUTO_REDACTION,
+        MANUAL_REDACTION,
+        TRACKING_REDACTION
     }
 
    
@@ -136,7 +133,7 @@ namespace VideoTools
             if(m_editsDictionary.ContainsKey(timestamp))
             {
                 ObservableCollection<FrameEdit> list = m_editsDictionary[timestamp];
-                list.Add(new FrameEdit(type,bbox));
+                list.Add(new FrameEdit(type,bbox));                
             }
             else
             {
@@ -196,6 +193,33 @@ namespace VideoTools
         }
 
 
+        public List<DNNTools.BoundingBox> GetBoundingBoxesForTimestamp(double timestamp, int width, int height)
+        {
+            ObservableCollection<FrameEdit> list;
+            List<DNNTools.BoundingBox> boxes = new List<DNNTools.BoundingBox>();
+
+            if (m_editsDictionary.ContainsKey(timestamp))
+            {
+                list = m_editsDictionary[timestamp];
+            }
+            else
+            {
+                list = new ObservableCollection<FrameEdit>();
+                m_editsDictionary.Add(timestamp, list);
+            }
+
+            foreach(FrameEdit fe in list)
+            {
+                float x1 = (float)fe.box.x1 / (float)width;
+                float y1 = (float)fe.box.y1 / (float)height;
+                float x2 = (float)fe.box.x2 / (float)width;
+                float y2 = (float)fe.box.y2 / (float)height;
+                boxes.Add(new DNNTools.BoundingBox(x1,y1,x2,y2,1,0,1.0f));
+            }
+
+            return boxes;
+        }
+
         public void SetAllFrameEditsForFrame(long timestamp, ObservableCollection<FrameEdit> edits)
         {
             DeleteAllFrameEditsForFrame(timestamp);
@@ -211,7 +235,7 @@ namespace VideoTools
             }
         }
 
-        public ObservableCollection<FrameEdit> GetEditsForFrame(long timestamp)
+        public ObservableCollection<FrameEdit> GetEditsForFrame(double timestamp)
         {
             if (m_editsDictionary.ContainsKey(timestamp))
             {
@@ -228,10 +252,47 @@ namespace VideoTools
         {
             foreach (DNNTools.BoundingBox box in boxList)
             {
-                VideoTools.BoundingBox bbox = new VideoTools.BoundingBox((int)(box.x1 * imageWidth), (int)(box.y1 * imageHeight), (int)(box.x2 * imageWidth), (int)(box.y2 * imageHeight));
-                AddFrameEdit(timestamp, FRAME_EDIT_TYPE.REDACTION, bbox);
+                int x1 = (int)(box.x1 * imageWidth);
+                int y1 = (int)(box.y1 * imageHeight);
+                int x2 = (int)(box.x2 * imageWidth);
+                int y2 = (int)(box.y2 * imageHeight);
+                VideoTools.BoundingBox bbox = new VideoTools.BoundingBox(x1,y1,x2,y2);
+                AddFrameEdit(timestamp, FRAME_EDIT_TYPE.AUTO_REDACTION, bbox);
             }
         }
+
+
+        public void RemoveEditsByType(FRAME_EDIT_TYPE type)
+        {
+            // iterate each frame with edits
+            List<double> entriesToDelete = new List<double>();
+
+            foreach (KeyValuePair<double, ObservableCollection<FrameEdit>> frame in m_editsDictionary)
+            {
+                ObservableCollection<FrameEdit> list = frame.Value;
+                ObservableCollection<FrameEdit> itemsToDelete = new ObservableCollection<FrameEdit>();
+                foreach (FrameEdit fe in list)
+                {
+                    if (fe.type == type)
+                        itemsToDelete.Add(fe);
+                }
+
+                foreach(FrameEdit fe in itemsToDelete)
+                {
+                    list.Remove(fe);
+                }
+
+                if (list.Count == 0)
+                    entriesToDelete.Add(frame.Key);
+            }
+
+            foreach(double timestamp in entriesToDelete)
+            {
+                m_editsDictionary.Remove(timestamp);
+            }
+        }
+
+     
 
 
         public bool SaveDatabase()

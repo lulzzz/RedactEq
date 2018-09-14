@@ -16,6 +16,7 @@ using DNNTools;
 using System.Threading;
 using System.Threading.Tasks.Dataflow;
 using TensorFlow;
+using Equature.Integration;
 
 namespace RedactEQ
 {
@@ -30,6 +31,7 @@ namespace RedactEQ
 
         MainViewModel m_vm;
 
+        NonMaximumSuppression m_nms;
 
         private DNNengine m_engine;
         CancellationTokenSource m_cancelTokenSource;
@@ -37,36 +39,56 @@ namespace RedactEQ
         TaskScheduler m_uiTask;
         int m_analysisWidth, m_analysisHeight;
 
-        ITargetBlock<Tuple<byte[], double, int, int, int, WriteableBitmap, bool>> m_pipeline;
+        ITargetBlock<Tuple<ImagePackage, WriteableBitmap, WriteableBitmap, bool>> m_pipeline;
 
         VideoEditsDatabase m_editsDB;
-        int m_currentFrameIndex;
+        //int m_currentFrameIndex;
         int m_maxFrameIndex;
         bool m_dragging;
         Point m_p1, m_p2;
-        
+
+        ITargetBlock<Tuple<int>> m_cachePipeline;
+
+        bool m_waitingForTrackingRect = false;
+        bool m_tracking = false;
+        Int32Rect m_startingTrackingRect;
+        CVTracker m_tracker;
+
+        int m_manualAutoStep;
+
+        long m_currentMp4FileDurationMilliseconds = 0;
 
         public MainWindow()
         {
             InitializeComponent();
             m_vm = new MainViewModel();
             DataContext = m_vm;
-            m_currentFrameIndex = 0;
+            m_vm.currentFrameIndex = 0;
 
             m_analysisHeight = 480;
             m_analysisWidth = 640;
+
+            m_manualAutoStep = 0;
             
             m_uiTask = TaskScheduler.FromCurrentSynchronizationContext();
 
-            if (InitDNN("D:/tensorflow/pretrained_models/Golden/1/frozen_inference_graph.pb",
-                    "D:/tensorflow/pretrained_models/Golden/1/face_label_map.pbtxt"))
+            TrackStepForwPB.Visibility = Visibility.Hidden;
+            TrackRunForwPB.Visibility = Visibility.Hidden;
+
+            videoNavigator.RangeChanged += VideoNavigator_RangeChanged;
+
+        }
+
+        private void VideoNavigator_RangeChanged(object sender, RangeSliderEventArgs e)
+        {
+            double targetTimestamp = e.Current / 100.0 * (double)m_currentMp4FileDurationMilliseconds / 1000.0;
+            int frameIndex;
+            double timestamp;
+            double percentPosition;
+            if(m_videoCache.GetClosestFrameIndex(targetTimestamp, out frameIndex, out timestamp, out percentPosition))
             {
-                //TestImage("d:/Pictures/kids_2.jpg");
-            }
-            else
-            {
-                MessageBox.Show("Failed to Initialize DNN: " + m_errorMsg, "DNN Engine Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                Close();
+                m_cachePipeline.Post(Tuple.Create<int>(frameIndex));
+                videoNavigator.CurrentValue = percentPosition;
             }
 
         }
@@ -103,6 +125,9 @@ namespace RedactEQ
                     success = m_engine.Init(modelFile, classes);
 
                     m_cancelTokenSource = new CancellationTokenSource();
+
+                    m_nms = new NonMaximumSuppression();
+                    m_nms.Init();
 
                     m_pipeline = m_engine.CreateDNNPipeline(modelFile, classes, m_editsDB, m_analysisWidth, m_analysisHeight, TFDataType.UInt8, 0.50f, null,null,
                                                             m_uiTask, m_cancelTokenSource.Token);
@@ -152,38 +177,99 @@ namespace RedactEQ
             {
                 m_vm.mp4Filename = openFileDialog.FileName;
 
-                m_videoCache = new VideoCache("VideoCache", m_vm.mp4Filename, 2);
-                m_videoCache.Init();
-                m_maxFrameIndex = m_videoCache.GetMaxFrameIndex();
-
                 // create new video edits database and bind to listview
 
                 if (m_editsDB != null) m_editsDB.SaveDatabase();
 
                 m_editsDB = new VideoEditsDatabase(m_vm.mp4Filename);
 
-                double timestamp;
-                int width, height, depth;
-                byte[] data;
-                if(m_videoCache.GetFrame(0, out timestamp, out width, out height, out depth, out data))
+
+                if (InitDNN("D:/tensorflow/pretrained_models/Golden/1/frozen_inference_graph.pb",
+                        "D:/tensorflow/pretrained_models/Golden/1/face_label_map.pbtxt"))
                 {
-                    Update_Manual(timestamp, width, height, depth, data);
-
-                    m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes_Manual();
-
-                    Update_Auto(timestamp, width, height, depth, data);
-                    m_vm.RedrawRedactionBoxes_Auto();
+                    //TestImage("d:/Pictures/kids_2.jpg");
+                }
+                else
+                {
+                    MessageBox.Show("Failed to Initialize DNN: " + m_errorMsg, "DNN Engine Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    Close();
                 }
 
+
+                m_videoCache = new VideoCache("VideoCache", m_vm.mp4Filename, 2);
+                m_videoCache.Init(640, 480);
+
+                m_videoCache.VideoCacheEvent += M_videoCache_VideoCacheEvent;
+
+                m_cachePipeline = m_videoCache.CreateCacheUpdatePipeline(2);
+
+                m_maxFrameIndex = m_videoCache.GetMaxFrameIndex();
+
+                m_currentMp4FileDurationMilliseconds = m_videoCache.GetVideoDuration();
+
+                m_videoCache.GetGopList(m_vm.mp4Filename, null);
+
                 PlayerRibbon_PlayPB.IsEnabled = true;
-                AutoRedactRibbon_PlayPB.IsEnabled = true;
+                AutoRedact_PlayPB.IsEnabled = true;
 
                 m_vm.state = AppState.READY;
 
             }
         }
 
+        private void M_videoCache_VideoCacheEvent(object sender, VideoCache_EventArgs e)
+        {
+            switch(e.status)
+            {
+                case VideoCache_Status_Type.ERROR:
+                    // run on UI thread
+                    Application.Current.Dispatcher.Invoke(new Action(() => {
+                        MessageBox.Show(e.message, "Video Frame Cache Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }));                    
+                    break;
+                case VideoCache_Status_Type.FRAME:
+                    if(e.frame != null)
+                    {
+                        // run on UI thread
+                        Application.Current.Dispatcher.Invoke(new Action(() => {
+                            m_vm.currentFrameIndex = e.frame.frameIndex;
+
+                            switch(m_vm.activeTabIndex)
+                            {
+                                case 0: // Auto
+                                    m_vm.SetAutoImage(e.frame.imagePackage.width, e.frame.imagePackage.height, e.frame.imagePackage.numChannels, e.frame.imagePackage.data);
+                                    goto case 1;                                    
+                                case 1: // Manual
+                                    m_vm.SetManualImage(e.frame.imagePackage.width, e.frame.imagePackage.height, e.frame.imagePackage.numChannels, e.frame.imagePackage.data);
+                                    m_vm.lastManualImageByteArray = e.frame.imagePackage.data;
+                                    if(m_tracking)
+                                    {
+                                        UpdateTracker(e.frame.timestamp);
+
+                                        if (m_manualAutoStep > 0)
+                                            ForwPB_Click(null, null);
+                                        else if (m_manualAutoStep < 0)
+                                            PrevPB_Click(null, null);
+                                    }
+                                    break;
+                                case 2: // Player
+                                    break;
+                            }                            
+
+                            m_vm.timestamp = e.frame.timestamp;
+
+                            m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(e.frame.timestamp);
+                            m_vm.RedrawRedactionBoxes_Manual();
+
+                            double durationOfEntireVideo = (double)m_videoCache.GetVideoDuration() / 1000.0;
+                            double percentDone = e.frame.timestamp / durationOfEntireVideo * 100.0f;
+                            videoNavigator.CurrentValue = percentDone;
+                        }));
+                    }
+                    break;
+            }
+
+        }
 
         private void ExportItem_Click(object sender, RoutedEventArgs e)
         {
@@ -197,7 +283,6 @@ namespace RedactEQ
             Close();
         }
 
-  
 
         private string BuildEditedFilename(string filename)
         {
@@ -227,10 +312,43 @@ namespace RedactEQ
             int x1, x2, y1, y2;
             GetDrawPoints(out x1, out y1, out x2, out y2);
 
-            if (m_editsDB != null)
-                m_editsDB.AddFrameEdit(m_vm.timestamp, FRAME_EDIT_TYPE.REDACTION, new VideoTools.BoundingBox(x1,y1,x2,y2));
+            if(m_waitingForTrackingRect)
+            {
+                m_startingTrackingRect = new Int32Rect(x1, y1, x2 - x1 + 1, y2 - y1 + 1);                
 
-            m_vm.RedrawRedactionBoxes_Manual();
+                // Create a tracker
+                m_tracker = new CVTracker();
+                m_tracker.Init(TrackerType.KCF);
+                if (m_vm.lastManualImageByteArray != null)
+                {
+                    if(m_tracker.StartTracking(m_vm.lastManualImageByteArray, m_vm.width, m_vm.height,
+                        m_startingTrackingRect.X, m_startingTrackingRect.Y, m_startingTrackingRect.Width, m_startingTrackingRect.Height))
+                    {
+                        m_tracking = true;
+                        m_vm.manualMessage = "Ready to Track";
+                        TrackStepForwPB.Visibility = Visibility.Visible;
+                        TrackRunForwPB.Visibility = Visibility.Visible;
+                    }
+                    else
+                    {
+                        MessageBox.Show("Failed to Initialize Tracker", "Tracker Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        m_tracking = false;
+                        m_vm.manualMessage = "";
+
+                    }
+                }
+
+
+                if (m_editsDB != null)
+                {
+                    if (m_tracking)
+                        m_editsDB.AddFrameEdit(m_vm.timestamp, FRAME_EDIT_TYPE.TRACKING_REDACTION, new VideoTools.BoundingBox(x1, y1, x2, y2));
+                    else
+                        m_editsDB.AddFrameEdit(m_vm.timestamp, FRAME_EDIT_TYPE.MANUAL_REDACTION, new VideoTools.BoundingBox(x1, y1, x2, y2));
+                }
+
+                m_vm.RedrawRedactionBoxes_Manual();
+            }
                 
         }
 
@@ -296,8 +414,8 @@ namespace RedactEQ
             int x1, x2, y1, y2;
             GetDrawPoints(out x1, out y1, out x2, out y2);
 
-            if (m_editsDB != null)
-                m_editsDB.AddFrameEdit(m_vm.timestamp, FRAME_EDIT_TYPE.REDACTION, new VideoTools.BoundingBox(x1, y1, x2, y2));
+            //if (m_editsDB != null)
+            //    m_editsDB.AddFrameEdit(m_vm.timestamp, FRAME_EDIT_TYPE.REDACTION, new VideoTools.BoundingBox(x1, y1, x2, y2));
             
             m_vm.RedrawRedactionBoxes_Auto();
 
@@ -371,94 +489,46 @@ namespace RedactEQ
 
         private void PrevPB_Click(object sender, RoutedEventArgs e)
         {
-            double timestamp;
-            int width, height, depth;
-            byte[] imageData;
-
-            if(m_currentFrameIndex > 0)
+            if(m_vm.currentFrameIndex > 0)
             {
-                int index = m_currentFrameIndex - 1;
+                int index = m_vm.currentFrameIndex - 1;
 
-                if(m_videoCache.GetFrame(index, out timestamp, out width, out height, out depth, out imageData))
-                {
-                    m_currentFrameIndex = index;
-                    m_vm.SetManualImage(width, height, depth, imageData);
-                    m_vm.timestamp = timestamp;
-
-                    m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes_Manual();
-                }
+                m_cachePipeline.Post(Tuple.Create<int>(index));
             }            
         }
 
         private void ForwPB_Click(object sender, RoutedEventArgs e)
         {
-            double timestamp;
-            int width, height, depth;
-            byte[] imageData;
-
-            if(m_currentFrameIndex < m_maxFrameIndex)
+            if(m_vm.currentFrameIndex < m_maxFrameIndex)
             {
-                int index = m_currentFrameIndex + 1;
+                int index = m_vm.currentFrameIndex + 1;
 
-                if(m_videoCache.GetFrame(index, out timestamp, out width, out height, out depth, out imageData))
-                {
-                    m_currentFrameIndex = index;
-                    m_vm.SetManualImage(width, height, depth, imageData);
-                    m_vm.timestamp = timestamp;
-
-                    m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes_Manual();
-                }
+                m_cachePipeline.Post(Tuple.Create<int>(index));
             }
         }
 
         private void PrevFastPB_Click(object sender, RoutedEventArgs e)
         {
-            double timestamp;
-            int width, height, depth;
-            byte[] imageData;
-
             int stepSize = 10;
-            int index = m_currentFrameIndex - stepSize;
+            int index = m_vm.currentFrameIndex - stepSize;
             if (index < 0) index = 0;
 
-            if (index != m_currentFrameIndex)
+            if (index != m_vm.currentFrameIndex)
             {
-                if (m_videoCache.GetFrame(index, out timestamp, out width, out height, out depth, out imageData))
-                {
-                    m_currentFrameIndex = index;
-                    m_vm.SetManualImage(width, height, depth, imageData);
-                    m_vm.timestamp = timestamp;
-
-                    m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes_Manual();
-                }
+                m_cachePipeline.Post(Tuple.Create<int>(index));
             }
         }
 
 
         private void ForwFastPB_Click(object sender, RoutedEventArgs e)
         {
-            double timestamp;
-            int width, height, depth;
-            byte[] imageData;
-
             int stepSize = 10;
-            int index = m_currentFrameIndex + stepSize;
+            int index = m_vm.currentFrameIndex + stepSize;
             if (index > m_maxFrameIndex) index = m_maxFrameIndex;
 
-            if (index != m_currentFrameIndex)
+            if (index != m_vm.currentFrameIndex)
             {
-                if (m_videoCache.GetFrame(index, out timestamp, out width, out height, out depth, out imageData))
-                {
-                    m_currentFrameIndex = index;
-                    m_vm.SetManualImage(width, height, depth, imageData);
-                    m_vm.timestamp = timestamp;
-
-                    m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(timestamp);
-                    m_vm.RedrawRedactionBoxes_Manual();
-                }
+                m_cachePipeline.Post(Tuple.Create<int>(index));
             }
         }
 
@@ -472,142 +542,7 @@ namespace RedactEQ
         }
 
 
-        //////////////////////////////////////////////////////////////////////////////
-        //////////////////////////////////////////////////////////////////////////////
-        //////////////////////////////////////////////////////////////////////////////
-
-        // Test functions
-
-        //public void LoadKeyFrames(string mp4Filename, Dictionary<int,double> gopDict, bool loadIntoListView)
-        //{
-        //    // All frames in MP4
-        //    // KF1  F   F   KF2 F   F   KF3 F   F   KF4 F   F   KF5 F   F   KF6 F   F   KF7 F   F   KF8 F   F   KF9 F   F   KF10 F  F
-        //    //
-        //    // m_gopDictionaryAll:  all key frames, Dictionary<int,double>(index,timestamp)
-        //    // KF1  KF2 KF3 KF4 KF5 KF6 KF7 KF8 KF9 KF10
-        //    //
-        //    // m_vm.gopList: key frames in scroll viewer, List<GOP_KEY_FRAME>
-        //    // KF1 KF5 KF9
-
-        //    const int MAX_SCROLLVIEWER_COUNT = 10;
-
-        //    // get total number of key frames in file, so that we can figure out if we can load all of them.
-        //    // If there's too many of them, we need to figure out how many to skip.
-
-        //    // REPLACE THIS START
-        //        int GOPsize = 10;
-        //        string[] framesAll = Directory.GetFiles("d:\\temp1\\train", "*.jpg");               
-        //        int totalFrames = framesAll.Length;
-
-        //        // build list of ALL key frames
-        //        gopDict.Clear();
-        //        int ndx = 0;
-        //        double timestamp = 0.0; // dummy timestamp
-        //        foreach(string frame in framesAll)
-        //        {
-        //            if (ndx % GOPsize == 0)
-        //                gopDict.Add(ndx, timestamp);
-        //            ndx++;
-        //            timestamp += 0.05;
-        //        }
-
-        //        int totalGOPs = gopDict.Count; // (totalFrames + GOPsize - 1) / GOPsize; // i.e. number of key frames
-        //    // REPLACE THIS END
-
-
-        //    // figure out skip count
-        //    int skipCount = 1;
-        //    while((totalGOPs/skipCount) > MAX_SCROLLVIEWER_COUNT)
-        //    {
-        //        skipCount++;
-        //    }
-
-
-        //    if (loadIntoListView)
-        //    {
-        //        // Get the appropriate key frames and load them into scroll viewer list
-        //        m_vm.gopList.Clear();
-        //        foreach (KeyValuePair<int, double> item in m_gopDictionary)
-        //        {
-        //            int index = item.Key;
-        //            double tstamp = item.Value;
-        //            if (index % skipCount == 0)
-        //            {
-        //                // REPLACE THIS START
-        //                string filename = framesAll[index];
-        //                byte[] arr;
-        //                int width;
-        //                int height;
-        //                int depth;
-        //                GetDecodedByteArray(filename, out width, out height, out depth, out arr);
-        //                // REPLACE THIS END
-
-        //                m_vm.gopList.Add(new GOP_KEY_FRAME(index, tstamp, width, height, depth, arr));
-        //            }
-        //        }
-        //    }
-            
-        //}
-
-
-        //public void LoadCache(GOPCache cache, string directory, string filePattern)
-        //{
-        //    cache.Reset();
-
-        //    string[] files = Directory.GetFiles(directory, filePattern);
-
-        //    double timestamp = 0.000;
-
-        //    foreach(string filename in files)
-        //    {                
-        //        byte[] arr;
-        //        int width;
-        //        int height;
-        //        int depth;
-
-        //        GetDecodedByteArray(filename, out width, out height, out depth, out arr);
-
-        //        cache.AddImageToCache(timestamp, width, height, 3, arr);
-
-        //        timestamp += 0.05;
-        //    }
-        //}
-
-        //public void LoadCache(int gopIndex)
-        //{
-        //    m_gopCache.Reset();
-
-        //    double gop_timestamp = m_gopDictionary[gopIndex];
-            
-        //    // get all decoded frames in for gop with given timestamp, and then put them in the caches
-
-        //    // REPLACE
-
-        //    int GOPsize = 10;
-        //    string[] files = Directory.GetFiles("d:\\temp1\\train", "*.jpg");            
-            
-        //    for(int i = gopIndex; i<gopIndex + GOPsize; i++)
-        //    {
-        //        if (i < files.Length)
-        //        {
-        //            byte[] arr;
-        //            int width;
-        //            int height;
-        //            int depth;
-
-        //            GetDecodedByteArray(files[i], out width, out height, out depth, out arr);
-
-        //            m_gopCache.AddImageToCache(gop_timestamp, width, height, depth, arr);
-
-        //            gop_timestamp += 0.05;
-        //        }
-        //        else
-        //            break;
-        //    }
-
-        //    // END REPLACE
-
-        //}
+     
 
         public bool GetDecodedByteArray(string filename, out int width, out int height, out int depth, out byte[] data)
         {
@@ -658,14 +593,32 @@ namespace RedactEQ
         }
 
 
-        public void LoadImageToManual(string filename)
+        public bool LoadImageFromFile(string filename, ref int width, ref int height, ref int depth, ref byte[] data)
         {
-            System.Drawing.Image img = System.Drawing.Image.FromFile(filename);
-            byte[] arr = ImageToByteArray(img);
-            int width = img.Width;
-            int height = img.Height;            
+            //System.Drawing.Image img = System.Drawing.Image.FromFile(filename);
+            //byte[] arr = ImageToByteArray(img);
+            //width = img.Width;
+            //height = img.Height;
+            //System.Drawing.Imaging.PixelFormat format = img.PixelFormat;
+            //if(format == System.Drawing.Imaging.PixelFormat.)
 
-            m_vm.SetManualImage(width, height, 3, arr);
+            bool success = true;
+            int w, h, d;
+            byte[] arr;
+            if (GetDecodedByteArray(filename, out w, out h, out d, out arr))
+            {
+                width = w;
+                height = h;
+                depth = d;
+                data = arr;                
+            }
+            else
+            {
+                success = false;
+            }
+
+            return success;
+            
         }
 
 
@@ -703,6 +656,7 @@ namespace RedactEQ
             //Update(m_currentGOPindex, false);
         }
 
+  
 
 
         ////////////////////////////////////////////////////////////////////////////////
@@ -736,7 +690,8 @@ namespace RedactEQ
 
                 m_vm.playerBitmap = new WriteableBitmap(bs);
 
-                double percentDone = (double)frame.timestamp / (double)frame.length * 100.0f;
+                double durationOfEntireVideo = (double)m_videoCache.GetVideoDuration() / 1000.0;
+                double percentDone = frame.timestamp / durationOfEntireVideo * 100.0f;                
                 videoNavigator.CurrentValue = percentDone;
             }
         }
@@ -827,14 +782,25 @@ namespace RedactEQ
 
 
 
-        public void Redaction_Start(string filename, int decodeWidth, int decodeHeight, bool paceOutput)
+        public void Redaction_Start(string filename, int decodeWidth, int decodeHeight, bool paceOutput, float confidence, bool useTracker)
         {
             VideoTools.Mp4Reader mp4Reader = new VideoTools.Mp4Reader();
             m_cancelTokenSource = new CancellationTokenSource();
             m_pauseTokenSource = new WPFTools.PauseTokenSource();
             m_pauseTokenSource.IsPaused = false;
-            mp4Reader.StartPlayback(filename, NewFrame_to_Redact, decodeWidth, decodeHeight,
-                m_cancelTokenSource, m_pauseTokenSource, paceOutput);
+
+            IntPtr reader = Mp4.CreateMp4Reader(filename);
+            long durationMilliseconds;
+            double frameRate;
+            int width, height, sampleCount;
+            if(Mp4.GetVideoProperties(reader, out durationMilliseconds, out frameRate, out width, out height, out sampleCount))
+            {
+                double startTimestamp = videoNavigator.LowerValue / 100.0 * (double)(durationMilliseconds) / 1000.0;
+                double endTimestamp = videoNavigator.UpperValue / 100.0 * (double)(durationMilliseconds) / 1000.0;
+                mp4Reader.StartPlayback_1(filename, NewFrame_to_Redact, decodeWidth, decodeHeight, startTimestamp, endTimestamp, m_engine, confidence, useTracker,
+                    m_cancelTokenSource, m_pauseTokenSource, paceOutput);
+            }
+           
         }
 
 
@@ -843,42 +809,49 @@ namespace RedactEQ
         {
             if (frame.timestamp == -1)
             {
-                AutoRedactRibbon_StopPB_Click(null, null);
+                AutoRedact_StopPB_Click(null, null);
             }
             else
-            {
-                // handle new frame coming in
-                //BitmapSource bs = BitmapSource.Create(frame.width, frame.height, 96, 96,
-                //                PixelFormats.Bgr24, null, frame.data, frame.width * 3);
+            { 
 
-                //m_vm.autoImage = new WriteableBitmap(bs);
+                // run on UI thread
+                Application.Current.Dispatcher.Invoke(new Action(() => {
+                                        
+                    BitmapSource bs = BitmapSource.Create(frame.width, frame.height, 96, 96,
+                                    PixelFormats.Bgr24, null, frame.data, frame.width * 3);
 
-                double percentDone = (double)frame.timestamp / (double)frame.length * 100.0f;
-                videoNavigator.CurrentValue = percentDone;
+                    m_vm.autoImage = new WriteableBitmap(bs);
 
+                    double durationOfEntireVideo = (double)m_videoCache.GetVideoDuration() / 1000.0;
+                    double percentDone = frame.timestamp / durationOfEntireVideo * 100.0f;                    
+                    videoNavigator.CurrentValue = percentDone;
 
-                // submit frame to DNN
+                    if(frame.boxList != null)
+                    {
+                        frame.boxList = m_nms.Execute(frame.boxList, m_editsDB.GetBoundingBoxesForTimestamp(m_vm.timestamp, frame.width, frame.height), 0.60f);
 
-                if(m_vm.autoImage.PixelWidth != frame.width || m_vm.autoImage.PixelHeight != frame.height)
-                {
-                    m_vm.autoImage = BitmapFactory.New(frame.width, frame.height);
-                }
-                m_pipeline.Post(Tuple.Create<byte[], double, int, int, int, WriteableBitmap, bool>(frame.data, frame.timestamp, frame.width, frame.height, 3,
-                                                                                           m_vm.autoImage, false));
+                        m_editsDB.AddRedactionBoxesFromDNN(frame.boxList, frame.timestamp, frame.width, frame.height);
+                        
+                        m_vm.redactions = m_editsDB.GetEditsForFrame(frame.timestamp);
+                        m_vm.RedrawRedactionBoxes_Auto();
+                    }
+                    
+                }));
+
             }
         }
 
 
-        private void AutoRedactRibbon_PlayPB_Click(object sender, RoutedEventArgs e)
+        private void AutoRedact_PlayPB_Click(object sender, RoutedEventArgs e)
         {
             switch (m_vm.state)
             {
                 case AppState.REDACTION_PAUSED:
                     m_pauseTokenSource.IsPaused = false;
 
-                    AutoRedactRibbon_PlayPB.IsEnabled = false;
-                    AutoRedactRibbon_PausePB.IsEnabled = true;
-                    AutoRedactRibbon_StopPB.IsEnabled = true;
+                    AutoRedact_PlayPB.IsEnabled = false;
+                    AutoRedact_PausePB.IsEnabled = true;
+                    AutoRedact_StopPB.IsEnabled = true;
 
                     m_vm.state = AppState.REDACTION_RUNNING;
                     break;
@@ -886,52 +859,253 @@ namespace RedactEQ
                     if (m_vm.mp4Filename != null)
                         if (File.Exists(m_vm.mp4Filename))
                         {
-                            Redaction_Start(m_vm.mp4Filename, 640, 480, false);
+                            Redaction_Start(m_vm.mp4Filename, 640, 480, false, 0.70f, false);
 
-                            AutoRedactRibbon_PlayPB.IsEnabled = false;
-                            AutoRedactRibbon_PausePB.IsEnabled = true;
-                            AutoRedactRibbon_StopPB.IsEnabled = true;
+                            AutoRedact_PlayPB.IsEnabled = false;
+                            AutoRedact_PausePB.IsEnabled = true;
+                            AutoRedact_StopPB.IsEnabled = true;
 
                             m_vm.state = AppState.REDACTION_RUNNING;
                             m_pauseTokenSource.IsPaused = false;
                         }
                     break;
-            }
+            } 
         }
 
-        private void AutoRedactRibbon_PausePB_Click(object sender, RoutedEventArgs e)
+
+
+        private void AutoRedact_PausePB_Click(object sender, RoutedEventArgs e)
         {
             switch (m_vm.state)
             {
                 case AppState.REDACTION_PAUSED:
                     m_pauseTokenSource.IsPaused = false;
 
-                    AutoRedactRibbon_PlayPB.IsEnabled = false;
-                    AutoRedactRibbon_PausePB.IsEnabled = true;
-                    AutoRedactRibbon_StopPB.IsEnabled = true;
+                    AutoRedact_PlayPB.IsEnabled = false;
+                    AutoRedact_PausePB.IsEnabled = true;
+                    AutoRedact_StopPB.IsEnabled = true;
 
                     m_vm.state = AppState.REDACTION_RUNNING;
                     break;
                 case AppState.REDACTION_RUNNING:
                     m_pauseTokenSource.IsPaused = true;
 
-                    AutoRedactRibbon_PlayPB.IsEnabled = true;
-                    AutoRedactRibbon_PausePB.IsEnabled = false;
-                    AutoRedactRibbon_StopPB.IsEnabled = true;
+                    AutoRedact_PlayPB.IsEnabled = true;
+                    AutoRedact_PausePB.IsEnabled = false;
+                    AutoRedact_StopPB.IsEnabled = true;
 
                     m_vm.state = AppState.REDACTION_PAUSED;
                     break;
             }
         }
 
-        private void AutoRedactRibbon_StopPB_Click(object sender, RoutedEventArgs e)
+
+ 
+        private void TrackPB_Checked(object sender, RoutedEventArgs e)
+        {
+            m_waitingForTrackingRect = true;
+            m_tracking = false;
+            m_startingTrackingRect = new Int32Rect(0,0,0,0);
+
+            NavigateGroupBox.Visibility = Visibility.Hidden;
+            //TrackStepForwPB.Visibility = Visibility.Visible;
+            //TrackRunForwPB.Visibility = Visibility.Visible;
+
+            m_vm.manualMessage = "Select Area To Track";
+        }
+
+        private void TrackPB_Unchecked(object sender, RoutedEventArgs e)
+        {
+            m_waitingForTrackingRect = false;
+            m_tracking = false;
+
+            NavigateGroupBox.Visibility = Visibility.Visible;
+            TrackStepForwPB.Visibility = Visibility.Hidden;
+            TrackRunForwPB.Visibility = Visibility.Hidden;
+
+            m_vm.manualMessage = "";
+        }
+
+    
+
+        private void TrackStepForwPB_Click(object sender, RoutedEventArgs e)
+        {
+            m_manualAutoStep = 0;
+            ForwPB_Click(null, null);           
+        }
+
+        private void TrackRunForwPB_Click(object sender, RoutedEventArgs e)
+        {
+            m_manualAutoStep = 1;
+            ForwPB_Click(null, null);
+        }
+
+        private void TestPB_Click(object sender, RoutedEventArgs e)
+        {
+            int method = 4;  // 1 = from memory buffer, 2 = from file, 3 = from current Manual image 
+            List<DNNTools.BoundingBox> boxList;
+            NonMaximumSuppression nms = new NonMaximumSuppression();
+            int w = 0, h = 0, d = 0;
+            byte[] data = null;
+
+            switch (method)
+            {
+                case 1:
+                        OpenFileDialog openFileDialog1 = new OpenFileDialog();
+
+                        //openFileDialog1.InitialDirectory = @"d:\";
+                        openFileDialog1.Title = "Browse Image Files";
+
+                        openFileDialog1.CheckFileExists = true;
+                        openFileDialog1.CheckPathExists = true;
+
+                        openFileDialog1.DefaultExt = "jpg";
+                        openFileDialog1.Filter = "JPEG (*.jpg)|*.jpg|PNG (*.png)|*.png";
+                        openFileDialog1.FilterIndex = 1;
+                        openFileDialog1.RestoreDirectory = true;
+
+                        openFileDialog1.ReadOnlyChecked = true;
+                        openFileDialog1.ShowReadOnly = true;
+
+                        Nullable<bool> result = openFileDialog1.ShowDialog();
+                        if (result == true)
+                        {
+                            string filename = openFileDialog1.FileName;
+
+                            
+                            if (LoadImageFromFile(filename, ref w, ref h, ref d, ref data))
+                            {
+
+                                boxList = m_engine.EvalImage(data, w, h, d, w, h, 0.70f);
+                            
+                                boxList = nms.Execute(boxList, 0.50f);
+
+
+                                m_vm.SetManualImage(w, h, d, data);
+                                m_vm.manualOverlay.Clear();
+                                foreach (DNNTools.BoundingBox box in boxList)
+                                {
+                                    int x1 = (int)(box.x1 * (float)w);
+                                    int y1 = (int)(box.y1 * (float)h);
+                                    int x2 = (int)(box.x2 * (float)w);
+                                    int y2 = (int)(box.y2 * (float)h);
+                                    m_vm.manualOverlay.FillRectangle(x1, y1, x2, y2, m_vm.fillColor);
+                                }
+
+                                m_vm.manualMessage = boxList.Count.ToString();
+                            }
+                        }
+                    break;
+                case 2:
+
+                    OpenFileDialog openFileDialog2 = new OpenFileDialog();
+
+                    //openFileDialog1.InitialDirectory = @"d:\";
+                    openFileDialog2.Title = "Browse Image Files";
+
+                    openFileDialog2.CheckFileExists = true;
+                    openFileDialog2.CheckPathExists = true;
+
+                    openFileDialog2.DefaultExt = "jpg";
+                    openFileDialog2.Filter = "JPEG (*.jpg)|*.jpg|PNG (*.png)|*.png";
+                    openFileDialog2.FilterIndex = 1;
+                    openFileDialog2.RestoreDirectory = true;
+
+                    openFileDialog2.ReadOnlyChecked = true;
+                    openFileDialog2.ShowReadOnly = true;
+
+                    Nullable<bool> result2 = openFileDialog2.ShowDialog();
+                    if (result2 == true)
+                    {
+                        string filename = openFileDialog2.FileName;
+
+                        if (LoadImageFromFile(filename, ref w, ref h, ref d, ref data))
+                        {   
+                            boxList = m_engine.EvalImageFile(filename, w, h, 0.70f);
+
+                            boxList = nms.Execute(boxList, 0.50f);
+
+
+                            m_vm.SetManualImage(w, h, d, data);
+                            m_vm.manualOverlay.Clear();
+                            foreach (DNNTools.BoundingBox box in boxList)
+                            {
+                                int x1 = (int)(box.x1 * (float)w);
+                                int y1 = (int)(box.y1 * (float)h);
+                                int x2 = (int)(box.x2 * (float)w);
+                                int y2 = (int)(box.y2 * (float)h);
+                                m_vm.manualOverlay.FillRectangle(x1, y1, x2, y2, m_vm.fillColor);
+                            }
+
+                            m_vm.manualMessage = boxList.Count.ToString();
+                        }
+                    }
+                    break;
+
+                case 3:
+
+                    w = m_vm.width;
+                    h = m_vm.height;
+                    d = m_vm.depth;
+                    
+                    boxList = m_engine.EvalImage(m_vm.lastManualImageByteArray, w, h, d, w, h, 0.70f);
+
+                    boxList = nms.Execute(boxList, m_editsDB.GetBoundingBoxesForTimestamp(m_vm.timestamp,w,h), 0.70f);                    
+
+                    m_editsDB.AddRedactionBoxesFromDNN(boxList, m_vm.timestamp, w, h);
+
+                    m_vm.RedrawRedactionBoxes_Manual();
+
+                    break;
+
+                case 4:
+                    videoNavigator.CurrentValue = 50;
+                    break;
+
+               }
+        
+        }
+
+        private void UpdateTracker(double timestamp)
+        {
+            if(m_tracker != null)
+            {
+                int roiX=0, roiY=0, roiW=0, roiH=0;
+                if(m_tracker.Update(m_vm.lastManualImageByteArray, m_vm.width, m_vm.height, ref roiX, ref roiY, ref roiW, ref roiH))
+                {
+                    //ObservableCollection<FrameEdit> list1 = m_editsDB.GetRedactionListForTimestamp(timestamp);
+                    //NonMaximumSuppression nms = new NonMaximumSuppression();
+                    //List<DNNTools.BoundingBox> list2 = new List<DNNTools.BoundingBox>();
+                    //foreach(FrameEdit fe in list1)
+                    //{
+
+                    //}
+                    //List<DNNTools.BoundingBox> list3 = nms.Execute(list2, 0.40f);
+                    //if(list3.Count > 1)
+                    //{
+
+                    //}
+                    
+                    m_editsDB.AddFrameEdit(timestamp, FRAME_EDIT_TYPE.TRACKING_REDACTION, new VideoTools.BoundingBox(roiX, roiY, roiX + roiW - 1, roiY + roiH - 1));
+                    m_vm.RedrawRedactionBoxes_Manual();
+                }
+                else
+                {
+                    // tracker failed
+                    TrackPB.IsChecked = false;
+                }
+            }
+        }
+
+
+        private void AutoRedact_StopPB_Click(object sender, RoutedEventArgs e)
         {
             m_pauseTokenSource.IsPaused = false;
             m_cancelTokenSource.Cancel();
 
-            AutoRedactRibbon_PlayPB.IsEnabled = true;
-            AutoRedactRibbon_PausePB.IsEnabled = false;
-            AutoRedactRibbon_StopPB.IsEnabled = false;
+            AutoRedact_PlayPB.IsEnabled = true;
+            AutoRedact_PausePB.IsEnabled = false;
+            AutoRedact_StopPB.IsEnabled = false;
 
             m_vm.state = AppState.READY;
 
@@ -942,12 +1116,7 @@ namespace RedactEQ
         }
 
 
-        private void TrackPB_Click(object sender, RoutedEventArgs e)
-        {
-
-        }
-
-
+ 
         #endregion
 
 
@@ -992,6 +1161,18 @@ namespace RedactEQ
                 if (_activeTabIndex != 2) trackingEnabled = false;  // disable tracking if ribbon tab changes away from Manual
             }
         }
+
+        private int _currentFrameIndex;
+        public int currentFrameIndex
+        {
+            get { return _currentFrameIndex; }
+            set
+            {
+                _currentFrameIndex = value; if (PropertyChanged != null)
+                    PropertyChanged(this, new PropertyChangedEventArgs("currentFrameIndex"));
+            }
+        }
+
 
 
         private string _mp4Filename;
@@ -1048,7 +1229,7 @@ namespace RedactEQ
             {
                 _timestamp = value; if (PropertyChanged != null)
                     PropertyChanged(this, new PropertyChangedEventArgs("timestamp"));
-                timestampStr = String.Format("{0:0.000}", value);
+                timestampStr = String.Format("{0:0.000} (" + currentFrameIndex.ToString() + ")", value);
             }
         }
 
@@ -1116,6 +1297,18 @@ namespace RedactEQ
             set
             { _manualOverlay = value; if (PropertyChanged != null)
                     PropertyChanged(this, new PropertyChangedEventArgs("manualOverlay"));
+            }
+        }
+
+
+        private byte[] _lastManualImageByteArray;
+        public byte[] lastManualImageByteArray
+        {
+            get { return _lastManualImageByteArray; }
+            set
+            {
+                _lastManualImageByteArray = value; if (PropertyChanged != null)
+                    PropertyChanged(this, new PropertyChangedEventArgs("lastManualImageByteArray"));
             }
         }
 
@@ -1205,17 +1398,27 @@ namespace RedactEQ
             set { _selectedFillColor = value; PropertyChanged(this, new PropertyChangedEventArgs("selectedFillColor")); }
         }
 
+        private string _manualMessage;
+        public string manualMessage
+        {
+            get { return _manualMessage; }
+            set { _manualMessage = value; PropertyChanged(this, new PropertyChangedEventArgs("manualMessage")); }
+        }
+
 
         public void RedrawRedactionBoxes_Manual()
         {
-            manualOverlay.Clear();
-
-            foreach (FrameEdit fe in redactions)
+            if (manualOverlay != null)
             {
-                if(fe == selectedRedaction)
-                    manualOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, selectedFillColor);
-                else
-                    manualOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, fillColor);
+                manualOverlay.Clear();
+
+                foreach (FrameEdit fe in redactions)
+                {
+                    if (fe == selectedRedaction)
+                        manualOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, selectedFillColor);
+                    else
+                        manualOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, fillColor);
+                }
             }
         }
 
@@ -1223,14 +1426,17 @@ namespace RedactEQ
 
         public void RedrawRedactionBoxes_Auto()
         {
-            autoOverlay.Clear();
+            if (autoOverlay != null)
+            {
+                autoOverlay.Clear();
 
-            foreach (FrameEdit fe in redactions)
-            {               
-                if (fe == selectedRedaction)
-                    autoOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, selectedFillColor);
-                else
-                    autoOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, fillColor);
+                foreach (FrameEdit fe in redactions)
+                {
+                    if (fe == selectedRedaction)
+                        autoOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, selectedFillColor);
+                    else
+                        autoOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, fillColor);
+                }
             }
         }
 
@@ -1238,7 +1444,7 @@ namespace RedactEQ
 
         public void SetManualImage(int Width, int Height, int Depth, byte[] data)
         {   
-            if(Width != width || Height != height)
+            if(Width != width || Height != height || manualImage == null || manualOverlay == null)
             {
                 width = Width;
                 height = Height;
@@ -1264,6 +1470,9 @@ namespace RedactEQ
             {
                 if (Width != autoImage.PixelWidth || Height != autoImage.PixelHeight)
                 {
+                    width = Width;
+                    height = Height;
+                    depth = Depth;
                     PixelFormat pf = PixelFormats.Bgr24;
                     if (depth > 3) pf = PixelFormats.Bgra32;
                     autoImage = new WriteableBitmap(width, height, 96, 96, pf, null);
@@ -1272,6 +1481,9 @@ namespace RedactEQ
             }
             else
             {
+                width = Width;
+                height = Height;
+                depth = Depth;
                 PixelFormat pf = PixelFormats.Bgr24;
                 if (depth > 3) pf = PixelFormats.Bgra32;
                 autoImage = new WriteableBitmap(width, height, 96, 96, pf, null);
@@ -1283,6 +1495,7 @@ namespace RedactEQ
             autoImage.Lock();
             autoImage.WritePixels(rect, data, autoImage.PixelWidth * depth, 0);
             autoImage.Unlock();
+     
         }
 
 
@@ -1318,7 +1531,7 @@ namespace RedactEQ
 
             _selectedFillColor = Color.FromArgb(0x55, 0xf9, 0xff, 0x33);
 
-
+            _manualMessage = "";
         }
 
 

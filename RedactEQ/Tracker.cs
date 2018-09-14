@@ -9,7 +9,14 @@ using System.Threading.Tasks;
 
 namespace DNNTools
 {
-
+    public enum TrackerType
+    {
+        BOOSTING,
+        CSRT,
+        KCF,
+        MOSSE,
+        TLD
+    }
 
     public class CVTracker : IDisposable
     {
@@ -84,9 +91,33 @@ namespace DNNTools
         // bool CVInitTracker(CVObjectTracker** pp_object_tracker, string trackerType)
         static extern bool CVTracker_Init(out IntPtr tracker, string trackerType);
 
-        public bool Init(string trackerType)
+        public bool Init(TrackerType trackerType)
         {
-            return CVTracker_Init(out cvTracker, trackerType);
+            string type = "KCF";  // default
+
+            switch(trackerType)
+            {
+                case TrackerType.BOOSTING:
+                    type = "BOOSTING";
+                    break;
+                case TrackerType.CSRT:
+                    type = "CSRT";
+                    break;
+                case TrackerType.KCF:
+                    type = "KCF";
+                    break;
+                case TrackerType.MOSSE:
+                    type = "MOSSE";
+                    break;
+                case TrackerType.TLD:
+                    type = "TLD";
+                    break;
+                default:
+                    type = "KCF";
+                    break;
+            }
+
+            return CVTracker_Init(out cvTracker, type);
         }
 
         //////////////////////////////////////////////////////////////////////////////////////////////////////////////////

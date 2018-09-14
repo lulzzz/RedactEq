@@ -67,6 +67,9 @@
         public static extern long SetTimePosition(System.IntPtr handle, long millisecondsFromStart);
 
         [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public static extern double SetTimePositionAbsolute(System.IntPtr handle, double absoluteSeconds);
+
+        [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
         public static extern bool Start(System.IntPtr mux, int memoryBufferSize);
 
         [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
@@ -77,6 +80,27 @@
 
         [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
         public static extern int VideoSample(System.IntPtr mux, byte[] data, int dataLength, double timestamp, bool isKey);
+
+        [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public static extern System.IntPtr CreateH264Encoder();
+
+        [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public static extern bool InitH264Encoder(System.IntPtr encoder, int width, int height, int framerate, int bitrate);
+
+        [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public static extern bool Encode(System.IntPtr encoder, System.IntPtr rgbaFrame, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPArray)] byte[] h264Nal, ref int nalSize, out bool key);
+
+        [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public static extern void DestroyH264Encoder(System.IntPtr encoder);
+
+        [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public static extern bool TranscodeJPEG(System.IntPtr encoder, byte[] jpegFrame, int jpegFrameSize, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPArray)] byte[] h264Nal, ref int nalSize, out bool key);
+
+        [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public static extern void GetVideoKeyFrameTimestamps(System.IntPtr encoder, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.SafeArray)] out double[] timestamps);
+
+        [System.Runtime.InteropServices.DllImport(Mp4Dll, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public static extern void GetVideoGOPLengths(System.IntPtr encoder, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.SafeArray)] out int[] gopLength);
 
     }
 }

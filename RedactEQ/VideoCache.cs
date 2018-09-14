@@ -2,14 +2,13 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Media.Imaging;
-using WPFTools;
+using Equature.Integration;
+using System.Threading.Tasks.Dataflow;
 
 namespace VideoTools
 {
-    class FrameRecord
+    public class FrameRecord
     {
         public double timestamp;  // frame timestamp
         public string filename; // filename in cache
@@ -25,7 +24,7 @@ namespace VideoTools
         }
     }
 
-    class GopRecord
+    public class GopRecord
     {
         public int frameIndex;    // the frame number for this GOP from all frames in a file 
         public double timestamp; // timestamp of first frame in GOP (i.e. the key frame)                               
@@ -40,27 +39,30 @@ namespace VideoTools
     
     public class VideoCache
     {
-        SortedList<int,GopRecord> m_gopList;  // sorted list of all gop timestamps in mp4 file
+        public SortedList<int,GopRecord> m_gopList;  // sorted list of all gop timestamps in mp4 file
                                               // key = frame index (within entire movie) for the key frame of this gop
                                               // value = GopRecord containing timestamp of key frame and numFrames in gop
 
-        Dictionary<int,FrameRecord> m_frameCache; // key = frame index within entire movie, value = filename
+        public SortedList<int,FrameRecord> m_frameCache; // key = frame index within entire movie, value = filename
         int m_padding;
         string m_mp4Filename;
         string m_cacheDirectory;
         BinaryReader m_reader;
         BinaryWriter m_writer;
 
-        int m_currentFrameIndex;
-        int m_currentGopIndex;
-        int m_currentGop_startFrameIndex;
-        int m_currentGop_endFrameIndex;
-        int m_frameCache_startFrameIndex;
-        int m_frameCache_endFrameIndex;
-        int m_frameCache_startGopIndex;
-        int m_frameCache_endGopIndex;
         int m_maxFrameIndex;
 
+        IntPtr m_mp4Reader;
+
+        List<int> m_gopsInCache;
+
+        long m_durationMilliseconds;
+        double m_frameRate;        
+        int m_height;
+        int m_width;
+        int m_sampleCount;
+        int m_targetWidth;
+        int m_targetHeight;
 
         // Events
         public delegate void VideoCache_EventHandler(object sender, VideoCache_EventArgs e);
@@ -78,7 +80,9 @@ namespace VideoTools
             m_padding = padding;
 
             m_gopList = new SortedList<int, GopRecord>();
-            m_frameCache = new Dictionary<int, FrameRecord>(); 
+            m_frameCache = new SortedList<int, FrameRecord>();
+            m_gopsInCache = new List<int>();
+            InitCache();                      
         }
 
         ~VideoCache()
@@ -87,147 +91,38 @@ namespace VideoTools
             {
                 if (Directory.Exists(m_cacheDirectory))
                     Directory.Delete(m_cacheDirectory);
+
+                if (m_mp4Reader != IntPtr.Zero)
+                    Mp4.DestroyMp4Reader(m_mp4Reader);
             }
             catch
             { }
         }
 
-        public bool Init()
+        public bool Init(int targetWidth, int targetHeight)
         {
             bool success = true;
 
-            success = GetGopList(m_mp4Filename);
+            m_targetWidth = targetWidth;
+            m_targetHeight = targetHeight;
 
-            // load the first Gop plus m_padding number of Gops after that
-            InitCache();
-
-            return success;
-        }
-
-        public string GetCacheDirectory(string cacheName)
-        {
-            string dir = Environment.CurrentDirectory;
-            return Path.Combine(dir, cacheName);
-        }
-
-        public string BuildFilenameFromTimestamp(double timestamp)
-        {            
-            return Path.Combine(m_cacheDirectory, ((int)(timestamp*1000)).ToString("d9") + ".frame");
-        }
-
-        public bool GetGopList(string mp4Filename)
-        {
-            bool success = true;
-            m_gopList.Clear();
-
-            // TEMP
-            string[] files = Directory.GetFiles("d:/temp1/frames", "*.jpg");
-
-            int gopSize = 10;
-            int gopIndex = 0;
-            double milliSecondsBetweenFrames = 0.010;
-            for(int frameIndex = 0; frameIndex < files.Length; frameIndex++)
+            if (m_mp4Reader != IntPtr.Zero)
             {
-                if(frameIndex % gopSize == 0)
-                {
-                    double timestamp = frameIndex * milliSecondsBetweenFrames;
-                    m_gopList.Add(gopIndex, new GopRecord(frameIndex, timestamp, gopSize));
-
-                    gopIndex++;
-                }
+                Mp4.DestroyMp4Reader(m_mp4Reader);
+                m_mp4Reader = IntPtr.Zero;
             }
 
-            // END TEMP
-
-            m_currentGopIndex = 0;
-            m_currentFrameIndex = 0;
-            m_currentGop_startFrameIndex = 0;
-            m_currentGop_endFrameIndex = 0;
-            m_frameCache_startGopIndex = 0;
-            m_frameCache_endGopIndex = 0;
-            m_frameCache_startFrameIndex = 0;
-            m_frameCache_endFrameIndex = 0;
-
-            GopRecord gop = m_gopList[m_gopList.Keys.Max()];
-            m_maxFrameIndex = gop.frameIndex + gop.numFrames - 1;
-
-            return success;
-        }
-
-        public bool LoadGopIntoCache(int gopIndex)
-        {
-            bool success = true;
-
-            // TEMP
-            GopRecord gop;
-
-            if (m_gopList.TryGetValue(gopIndex, out gop))
+            m_mp4Reader = Mp4.CreateMp4Reader(m_mp4Filename);
+            if(m_mp4Reader != IntPtr.Zero)
             {
-                int firstFrameIndexInGop = gop.frameIndex;
-                if (!m_frameCache.ContainsKey(firstFrameIndexInGop))
+
+                // Get the video metadata from the file
+                if (Mp4.GetVideoProperties(m_mp4Reader, out m_durationMilliseconds,
+                                           out m_frameRate, out m_width, out m_height, out m_sampleCount))
                 {
-                    // go get all frames for gop with a timestamp = gop.timestamp
-                    // then add them to the m_frameCache -- which means decoding them
-                    // and writing the decoded from to a file using the function
-                    //  WriteFile(string filename, double timestamp, int width, int height, int depth, byte[] frameData)
-
-                    double millisecondsBetweenFrames = 0.010;
-                    for (int i = 0; i < gop.numFrames; i++)
-                    {
-                        double timestamp = gop.timestamp + i * millisecondsBetweenFrames;
-                        string filename = BuildFilenameFromTimestamp(timestamp);
-                        int frameIndex = gop.frameIndex + i;
-
-                        string jpegFilename = Path.Combine("d:/temp1/frames", "img_" + (frameIndex + 1).ToString("D8") + ".jpg");
-                        int width, height, depth;
-                        byte[] data;
-                        if (File.Exists(jpegFilename))
-                        {
-                            if (GetDecodedByteArray(jpegFilename, out width, out height, out depth, out data))
-                            {
-                                if (WriteFile(filename, timestamp, width, height, depth, data))
-                                {
-                                    m_frameCache.Add(frameIndex, new FrameRecord(timestamp, Path.Combine(m_cacheDirectory, filename)));
-                                }
-                                else
-                                {
-                                    success = false;
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                success = false;
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            success = false;
-                            break;
-                        }
-                    }
-                }
-
-            }
-            // END TEMP
-
-            return success;
-        }
-
-        public bool RemoveGopFromCache(int gopIndex)
-        {
-            bool success = true;
-            
-            GopRecord gop;
-
-            if (m_gopList.TryGetValue(gopIndex, out gop))
-            {
-                for (int j = gop.frameIndex; j < gop.frameIndex + gop.numFrames; j++)
-                {
-                    FrameRecord frame = m_frameCache[j];
-                    if (File.Exists(frame.filename)) File.Delete(frame.filename);
-                    m_frameCache.Remove(j);
+                    OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to get properties of this video file: " +
+                        m_mp4Filename, null));
+                    success = false;
                 }
             }
             else
@@ -238,15 +133,51 @@ namespace VideoTools
             return success;
         }
 
-        public int GetLowestIndexInVideoCache()
+        public long GetVideoDuration()
         {
-            return m_frameCache.Keys.Min();            
+            return m_durationMilliseconds;
         }
 
-        public int GetHighestIndexInVideoCache()
+        public string GetCacheDirectory(string cacheName)
         {
-            return m_frameCache.Keys.Max();
+            string dir = Environment.CurrentDirectory;
+            return Path.Combine(dir, cacheName);
         }
+
+        public string BuildFilenameFromTimestamp(double timestamp)
+        {            
+            return Path.Combine(m_cacheDirectory, ((int)(timestamp*1000.0)).ToString("d9") + ".frame");
+        }
+
+    
+        public bool GetClosestFrameIndex(double time, out int frameIndex, out double timestamp, out double percentPosition)
+        {
+            bool success = false;
+            int targetGopIndex = 0;
+            frameIndex = 0;
+            timestamp = 0.0;
+            percentPosition = 0.0;
+
+            if (m_gopList != null)
+            {
+                foreach (KeyValuePair<int, GopRecord> gop in m_gopList)
+                {
+                    if (gop.Value.timestamp >= time)
+                    {
+                        targetGopIndex = gop.Key;
+                        frameIndex = gop.Value.frameIndex;
+                        timestamp = gop.Value.timestamp;
+                        double durationOfEntireVideo = (double)m_durationMilliseconds / 1000.0;
+                        percentPosition = timestamp / durationOfEntireVideo * 100.0f;
+                        success = true;
+                        break;
+                    }                   
+                }
+            }
+           
+            return success;
+        }
+
 
         public int GetMaxFrameIndex()
         {
@@ -287,14 +218,14 @@ namespace VideoTools
                     }
                     else
                     {
-                        OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Image File not correct size"));
+                        OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Image File not correct size", null));
                         success = false;
                     }
 
                 }
                 catch (Exception ex)
                 {
-                    OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, ex.Message));
+                    OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, ex.Message, null));
                     success = false;
                 }
                 finally
@@ -328,80 +259,22 @@ namespace VideoTools
             }
             catch (Exception ex)
             {
-                OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, ex.Message));
+                OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, ex.Message, null));
                 success = false;
             }
             finally
             {
-                m_writer.Close();
+                if(m_writer != null)
+                    m_writer.Close();
             }
 
             return success;
         }
                 
-        public bool GetFrame(int index, out double timestamp, out int width, out int height, out int depth, out byte[] frameData)
-        {
-            bool success = true;
-            timestamp = 0;
-            width = 0;
-            height = 0;
-            depth = 0;
-            frameData = null;
-            int currentFrameIndex_backup = m_currentFrameIndex;
-            m_currentFrameIndex = index;
-
-            // try to get the frame
-            FrameRecord frame;
-            if(m_frameCache.TryGetValue(index, out frame))
-            {
-                success = ReadFile(frame.filename, out timestamp, out width, out height, out depth, out frameData);
-                if (success)
-                {
-                    // check to see if we crossed a gop boundary.  If so, we need to update the cache
-                    UpdateCache();
-                }
-                else
-                {
-                    m_currentFrameIndex = currentFrameIndex_backup;
-                    OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to Load Frame from Cache\n" +
-                          index.ToString()));
-                }
-            }
-            else
-            {   // frame index not in cache
-                UpdateCache();
-                if (m_frameCache.TryGetValue(index, out frame))
-                {
-                    success = ReadFile(frame.filename, out timestamp, out width, out height, out depth, out frameData);
-                    if (success)
-                    {
-                        
-                    }
-                    else
-                    {
-                        m_currentFrameIndex = currentFrameIndex_backup;
-                        success = false;
-                        OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to Load Frame from Cache\n" +
-                              index.ToString()));
-                    }
-                }
-                else
-                {
-                    m_currentFrameIndex = currentFrameIndex_backup;
-                    success = false;
-                    OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to Find Frame in Cache\n" +
-                          index.ToString()));
-                }
-            }
-
-    
-            return success;
-        }
-        
+  
         public void InitCache()
         {
             // clear cache if it already exists
-            m_frameCache.Clear();
             if (Directory.Exists(m_cacheDirectory))
             {
                 // clear the directory
@@ -413,198 +286,7 @@ namespace VideoTools
                 Directory.CreateDirectory(m_cacheDirectory);
             }
 
-
-            for (int i = 0; i < m_padding + 1; i++)
-                LoadGopIntoCache(i);
-
-
-            // reset variables
-            m_currentGopIndex = 0;
-            GopRecord gop = m_gopList[m_currentGopIndex];
-            m_currentGop_startFrameIndex = gop.frameIndex;
-            m_currentGop_endFrameIndex = gop.frameIndex + gop.numFrames - 1;
-            m_frameCache_startGopIndex = 0;
-            m_frameCache_endGopIndex = m_padding;
-            m_frameCache_startFrameIndex = m_gopList[m_frameCache_startGopIndex].frameIndex;
-            gop = m_gopList[m_frameCache_endGopIndex];
-            m_frameCache_endFrameIndex = gop.frameIndex + gop.numFrames - 1;
         }
-
-        public void UpdateCache()
-        {
-            // NOTE: 
-            // make sure that m_currentFrameIndex has been updated to the desired index before calling this function
-            //
-            // make sure to update:
-            //      m_currentGopIndex
-            //      m_currentGop_startFrameIndex
-            //      m_currentGop_endFrameIndex
-            //      m_frameCache_startGopIndex
-            //      m_frameCache_endGopIndex
-            //      m_frameCache_startFrameIndex
-            //      m_frameCache_endFrameIndex
-
-            if (m_currentFrameIndex < m_currentGop_startFrameIndex)
-            {
-                // m_currentFrameIndex is BEFORE start frame cache, so correct frame cache to cover this frame index
-
-                // find GOP index that contains the current frame index, and call it "targetGopIndex"
-                int gopIndex = m_frameCache_startGopIndex;
-                int targetGopIndex = -1;
-                int maxGopIndex = m_gopList.Keys.Max();
-                bool done = false;
-                bool found = false;
-                while(!done)
-                {
-                    GopRecord gop;
-                    if(m_gopList.TryGetValue(gopIndex, out gop))
-                    {
-                        if(gop.frameIndex <= m_currentFrameIndex)
-                        {
-                            targetGopIndex = gopIndex;
-                            found = true;
-                            done = true;
-                        }
-                    }
-
-                    gopIndex--;
-                    if(gopIndex < 0)
-                    {
-                        done = true;
-                    }
-                }
-
-                if(found)
-                {
-                    // build list of gops to load
-
-                    int startGopIndex = targetGopIndex;
-                    while(startGopIndex > 0 &&  targetGopIndex - startGopIndex < m_padding)
-                    {
-                        startGopIndex--;
-                    }
-                    
-                    int endGopIndex = targetGopIndex;
-                    while(endGopIndex < maxGopIndex && endGopIndex - targetGopIndex < m_padding)
-                    {
-                        endGopIndex++;
-                    }
-                    
-
-                    // add new gops to cache
-                    for (int i = startGopIndex; i <= endGopIndex; i++)
-                        LoadGopIntoCache(i);
-
-                    // remove gops from cache that are outside [startGopIndex -> endGopIndex]
-                    for (int i = m_frameCache_startGopIndex; i <= m_frameCache_endGopIndex; i++)
-                    {
-                        if(i<startGopIndex || i>endGopIndex)
-                        {
-                            RemoveGopFromCache(i);
-                        }
-                    }
-
-                    // reset variables
-                    m_currentGopIndex = targetGopIndex;
-                    GopRecord gop = m_gopList[m_currentGopIndex];
-                    m_currentGop_startFrameIndex = gop.frameIndex;
-                    m_currentGop_endFrameIndex = gop.frameIndex + gop.numFrames - 1;
-                    m_frameCache_startGopIndex = startGopIndex;
-                    m_frameCache_endGopIndex = endGopIndex;
-                    m_frameCache_startFrameIndex = m_gopList[m_frameCache_startGopIndex].frameIndex;
-                    gop = m_gopList[m_frameCache_endGopIndex];
-                    m_frameCache_endFrameIndex = gop.frameIndex + gop.numFrames - 1;
-                }
-                else
-                {
-                    OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR,
-                        "Failed to find GOP containing Frame Number: " + m_currentFrameIndex.ToString()));
-                }
-            }
-            else if (m_currentFrameIndex > m_currentGop_endFrameIndex)
-            {
-                // m_currentFrameIndex is AFTER start frame cache, so correct frame cache to cover this frame index
-                
-                // find GOP index that contains the current frame index, and call it "targetGopIndex"
-                int gopIndex = m_frameCache_endGopIndex;
-                int targetGopIndex = -1;
-                int maxGopIndex = m_gopList.Keys.Max();
-                bool done = false;
-                bool found = false;
-                while (!done)
-                {
-                    GopRecord gop;
-                    if (m_gopList.TryGetValue(gopIndex, out gop))
-                    {
-                        if ((gop.frameIndex + gop.numFrames - 1) >= m_currentFrameIndex)
-                        {
-                            targetGopIndex = gopIndex;
-                            found = true;
-                            done = true;
-                        }
-                    }
-
-                    gopIndex++;
-                    if (gopIndex > maxGopIndex)
-                    {
-                        done = true;
-                    }
-                }
-
-                if (found)
-                {
-                    // build list of gops to load
-
-                    int startGopIndex = targetGopIndex;
-                    while (startGopIndex > 0 && targetGopIndex - startGopIndex < m_padding)
-                    {
-                        startGopIndex--;
-                    }
-
-                    int endGopIndex = targetGopIndex;
-                    while (endGopIndex < maxGopIndex && endGopIndex - targetGopIndex < m_padding)
-                    {
-                        endGopIndex++;
-                    }
-
-
-                    // add new gops to cache
-                    for (int i = startGopIndex; i <= endGopIndex; i++)
-                    {   
-                        LoadGopIntoCache(i);
-                    }
-
-                    // remove gops from cache that are outside [startGopIndex -> endGopIndex]
-                    for (int i = m_frameCache_startGopIndex; i <= m_frameCache_endGopIndex; i++)
-                    {
-                        if (i < startGopIndex || i > endGopIndex)
-                        {
-                            RemoveGopFromCache(i);
-                        }
-                    }
-
-                    // reset variables
-                    m_currentGopIndex = targetGopIndex;
-                    GopRecord gop = m_gopList[m_currentGopIndex];
-                    m_currentGop_startFrameIndex = gop.frameIndex;
-                    m_currentGop_endFrameIndex = gop.frameIndex + gop.numFrames - 1;
-                    m_frameCache_startGopIndex = startGopIndex;
-                    m_frameCache_endGopIndex = endGopIndex;
-                    m_frameCache_startFrameIndex = m_gopList[m_frameCache_startGopIndex].frameIndex;
-                    gop = m_gopList[m_frameCache_endGopIndex];
-                    m_frameCache_endFrameIndex = gop.frameIndex + gop.numFrames - 1;
-                }
-                else
-                {
-                    OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR,
-                        "Failed to find GOP containing Frame Number: " + m_currentFrameIndex.ToString()));
-                }
-
-
-            }
-       
-
-        } // END UpdateCache()
 
 
 
@@ -662,7 +344,316 @@ namespace VideoTools
         }
 
 
+        /////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////
+        
+        public int GetGopIndexContainingFrameIndex(int frameIndex, SortedList<int,GopRecord> gopList)
+        {
+            int gopIndex = -1;
+            foreach (KeyValuePair<int, GopRecord> item in gopList)
+            {
+                int index = item.Key;
+                int lastIndexOfGop = item.Value.frameIndex + item.Value.numFrames - 1;
+                if (lastIndexOfGop >= frameIndex)
+                {
+                    gopIndex = index;
+                    break;
+                }
+            }
 
+            return gopIndex;
+        }
+
+
+        public bool GetGopList(string mp4Filename, SortedList<int,GopRecord> gopList)
+        {
+            bool success = true;
+           
+            if (gopList == null) gopList = m_gopList;
+
+            gopList.Clear();
+
+            if (m_mp4Reader != IntPtr.Zero)
+            {
+                double[] timestamps;
+                Mp4.GetVideoKeyFrameTimestamps(m_mp4Reader, out timestamps);
+
+                int[] framesInGop = new int[timestamps.Length]; // FIX
+                Mp4.GetVideoGOPLengths(m_mp4Reader, out framesInGop);
+
+
+                int ndx = 0;
+                for (int i = 0; i < timestamps.Length; i++)
+                {
+                    gopList.Add(i, new GopRecord(ndx, timestamps[i], framesInGop[i]));
+                    ndx += framesInGop[i];
+                }
+            }
+            else
+            {
+                success = false;
+            }
+
+            if (gopList.Count > 0)
+            {
+                GopRecord gop = gopList[gopList.Keys.Max()];
+                m_maxFrameIndex = gop.frameIndex + gop.numFrames - 1;
+            }
+            else
+                m_maxFrameIndex = 0;
+
+            return success;
+        }
+
+
+        public bool LoadGopIntoCache(int gopIndex, SortedList<int, GopRecord> gopList, SortedList<int, FrameRecord> frameCache)
+        {
+            bool success = true;
+
+            // TEMP
+            GopRecord gop;
+
+            if (gopList.TryGetValue(gopIndex, out gop))
+            {
+                int firstFrameIndexInGop = gop.frameIndex;
+                if (!frameCache.ContainsKey(firstFrameIndexInGop))
+                {
+                    // go get all frames for gop with a timestamp = gop.timestamp
+                    // then add them to the m_frameCache -- which means decoding them
+                    // and writing the decoded from to a file using the function
+                    //  WriteFile(string filename, double timestamp, int width, int height, int depth, byte[] frameData)
+
+                    // NEW
+                    double actualPosition = Mp4.SetTimePositionAbsolute(m_mp4Reader, gop.timestamp + 0.001);
+                    byte[] frame = new byte[m_targetWidth * m_targetHeight * 3];
+                    bool key;
+                    int ndx = 0;
+
+                    if (!frameCache.ContainsKey(gop.frameIndex))
+                        while (true)
+                        {
+                            double ts = (double)Mp4.GetNextVideoFrame(m_mp4Reader, frame, out key, m_targetWidth, m_targetHeight)/1000.0;
+
+                            if (ts == -1)   // EOF                             
+                            {
+                                break;
+                            }
+
+                            string filename = BuildFilenameFromTimestamp(ts);
+                            int frameIndex = gop.frameIndex + ndx;
+
+                            if (WriteFile(filename, ts, m_targetWidth, m_targetHeight, 3, frame))
+                            {
+                                frameCache.Add(frameIndex, new FrameRecord(ts, Path.Combine(m_cacheDirectory, filename)));
+                            }
+                            else
+                            {
+                                success = false;
+                                break;
+                            }
+
+                            ndx++;
+
+                            if (ndx >= gop.numFrames)
+                            {
+                                break;
+                            }
+                        }
+
+
+                }
+
+            }
+            // END TEMP
+
+            return success;
+        }
+
+        public bool RemoveGopFromCache(int gopIndex, SortedList<int, GopRecord> gopList, SortedList<int, FrameRecord> frameCache)
+        {
+            bool success = true;
+
+            GopRecord gop;
+
+            if (gopList.TryGetValue(gopIndex, out gop))
+            {
+                for (int j = gop.frameIndex; j < gop.frameIndex + gop.numFrames; j++)
+                {
+                    FrameRecord frame = frameCache[j];
+                    if (File.Exists(frame.filename)) File.Delete(frame.filename);
+                    frameCache.Remove(j);
+                }
+            }
+            else
+            {
+                success = false;
+            }
+
+            return success;
+        }
+
+
+        public ITargetBlock<Tuple<int>> CreateCacheUpdatePipeline(int padding)
+        {
+            SortedList<int, GopRecord> l_gopList = new SortedList<int, GopRecord>();
+            SortedList<int, FrameRecord> l_frameCache = new SortedList<int, FrameRecord>();
+            List<int> l_gopsLoaded = new List<int>();
+            int l_padding = padding;
+            int l_currentGOP = -1;
+
+
+            FrameRecord frame;
+
+            // initialize cache
+            bool success1 = true;
+
+            if (GetGopList(m_mp4Filename, l_gopList))
+            {
+                for (int i = 0; i < padding + 1; i++)
+                {
+                    if (LoadGopIntoCache(i, l_gopList, l_frameCache))
+                    {
+                        l_gopsLoaded.Add(i);
+                    }
+                    else
+                    {
+                        OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Error Intializing Cache", null));
+                        success1 = false;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Error Intializing GOP List", null));
+                success1 = false;                
+            }
+
+            // send first image in file
+            if (success1)
+            {
+                l_currentGOP = 0;
+                
+                double timestamp;
+                int width, height, depth;
+                byte[] frameData;
+
+                if (l_frameCache.TryGetValue(0, out frame))
+                {                    
+                    if (ReadFile(frame.filename, out timestamp, out width, out height, out depth, out frameData))
+                    {
+                        OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.FRAME, "",
+                            new FramePackage(0, timestamp, new DNNTools.ImagePackage(frameData, timestamp, width, height, depth))));
+                    }
+                    else
+                    {
+                        OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to read Image File from Cache: " +
+                                                                    frame.filename, null));
+                    }
+                }
+            }
+
+
+        
+
+
+            ///////////////////////////////////////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////////////////////////////////////
+            ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+            var RequestImage = new ActionBlock<Tuple<int>>(inputData =>
+            {
+                int frameIndex = inputData.Item1;
+
+                bool success;
+                double timestamp;
+                int width, height, depth;
+                byte[] frameData;
+
+
+                if (l_frameCache.TryGetValue(frameIndex, out frame))
+                {                    
+                    success = ReadFile(frame.filename, out timestamp, out width, out height, out depth, out frameData);
+                    if (success)
+                    {
+                        OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.FRAME, "",
+                            new FramePackage(frameIndex, timestamp, new DNNTools.ImagePackage(frameData, timestamp, width, height, depth))));
+                    }
+                    else
+                    {
+                        OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to read Image File from Cache: " +
+                                                                    frame.filename, null));
+                    }                    
+                }
+                else
+                {
+                    // figure out which GOPs to load
+                    int gopToLoad = GetGopIndexContainingFrameIndex(frameIndex, l_gopList);
+
+                    if (gopToLoad != -1)  // if gop found, -1 indicates that it wasn't found
+                    {
+                        if (LoadGopIntoCache(gopToLoad, l_gopList, l_frameCache))
+                        {
+                            l_gopsLoaded.Add(gopToLoad);
+                            l_gopsLoaded.Sort();
+
+                            if (l_frameCache.TryGetValue(frameIndex, out frame))
+                            {                                
+                                if (ReadFile(frame.filename, out timestamp, out width, out height, out depth, out frameData))
+                                {
+                                    l_currentGOP = gopToLoad;
+
+                                    OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.FRAME, "",
+                                        new FramePackage(frameIndex, timestamp, new DNNTools.ImagePackage(frameData, timestamp, width, height, depth))));
+                                }
+                                else
+                                {
+                                    OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to read Image File from Cache: " +
+                                                                                frame.filename + "\nafter trying to load GOP into Cache.", null));
+                                }
+                            }
+
+                            // check to see if cache has grown to be too large.  If so, remove a gop from cache
+                            if(l_gopsLoaded.Count > (2*l_padding + 1))
+                            {
+                                int lowestGop = l_gopsLoaded[0];
+                                int highestGop = l_gopsLoaded[l_gopsLoaded.Count - 1];
+
+                                int interval1 = Math.Abs(l_currentGOP - lowestGop);
+                                int interval2 = Math.Abs(highestGop - l_currentGOP);
+
+                                if (interval1 > interval2)
+                                {
+                                    if (RemoveGopFromCache(lowestGop, l_gopList, l_frameCache))
+                                        l_gopsLoaded.RemoveAt(0);
+                                }
+                                else
+                                {
+                                    if (RemoveGopFromCache(highestGop, l_gopList, l_frameCache))
+                                        l_gopsLoaded.RemoveAt(l_gopsLoaded.Count - 1);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to Load GOP " + gopToLoad.ToString(), null));
+                        }
+                    }
+        
+                }
+
+            });
+
+
+
+            return RequestImage;
+        }
+
+        /////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////
 
 
     } // END class VideoCache
@@ -671,10 +662,21 @@ namespace VideoTools
 
     public enum VideoCache_Status_Type
     {
-        OK,
-        NEED_NEXT_GOP,
-        NEED_PREV_GOP,
+        FRAME,
         ERROR
+    }
+
+    public class FramePackage
+    {
+        public int frameIndex;
+        public double timestamp;
+        public DNNTools.ImagePackage imagePackage;
+        public FramePackage(int FrameIndex, double TimeStamp, DNNTools.ImagePackage ImgPackage)
+        {
+            frameIndex = FrameIndex;
+            timestamp = TimeStamp;
+            imagePackage = ImgPackage;
+        }
     }
 
     public class VideoCache_EventArgs : EventArgs
@@ -693,10 +695,19 @@ namespace VideoTools
             set { this._message = value; }
         }
 
-        public VideoCache_EventArgs(VideoCache_Status_Type Status, string Message)
+        private FramePackage _frame;
+        public FramePackage frame
+        {
+            get { return this._frame; }
+            set { this._frame = value; }
+        }
+
+
+        public VideoCache_EventArgs(VideoCache_Status_Type Status, string Message, FramePackage framePackage)
         {
             status = Status;
             message = Message;
+            frame = framePackage;
         }
     }
 }

@@ -79,7 +79,9 @@
                                         <RepeatButton x:Name="HorizontalTrackLargeChangeDecreaseRepeatButton" Template="{StaticResource RepeatButtonControlTemplate}" />
                                     </Track.DecreaseRepeatButton>
                                     <Track.Thumb>
-                                        <Thumb x:Name="HorizontalThumb" Height="18" IsTabStop="True" Width="4" Style="{StaticResource ThumbStyle}" Background="Red" BorderBrush="#00000000" Margin="1" />                                       
+                                        <Thumb x:Name="HorizontalThumb" Height="18" IsTabStop="True" Width="4" Style="{StaticResource ThumbStyle}" 
+                                               DragCompleted="HorizontalThumb_DragCompleted"
+                                               Background="Red" BorderBrush="#00000000" Margin="1" />                                       
                                     </Track.Thumb>
                                 </Track>
                             </Grid>

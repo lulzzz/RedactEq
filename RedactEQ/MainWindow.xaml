@@ -18,7 +18,8 @@
         </Grid.RowDefinitions>
 
 
-        <Ribbon Grid.Row="0" Margin="0,-22,0,0" x:Name="MainRibbon" SelectionChanged="MainRibbon_SelectionChanged" SelectedIndex="{Binding activeTabIndex}" >
+        <Ribbon Grid.Row="0" Margin="0,0,0,0" Height="100"
+                x:Name="MainRibbon" SelectionChanged="MainRibbon_SelectionChanged" SelectedIndex="{Binding activeTabIndex}" >
             <Ribbon.ApplicationMenu>
                 <RibbonApplicationMenu SmallImageSource="Images/camera.png">
 
@@ -39,25 +40,85 @@
             <RibbonTab x:Name="AutoRedactRibbonTab" Header="Auto" >
 
                 <RibbonGroup LargeImageSource="Images/redact.png">
-                    <RibbonButton x:Name="AutoRedactRibbon_PlayPB" Content="Play" LargeImageSource="Images/play.png"
+                    <RibbonButton x:Name="AutoRedact_PlayPB" Content="Play" LargeImageSource="Images/play.png"
                                   IsEnabled="False"
-                                  Width="100" Height="60" Click="AutoRedactRibbon_PlayPB_Click"/>
-                    <RibbonButton x:Name="AutoRedactRibbon_PausePB" Content="Pause" LargeImageSource="Images/pause.png"
+                                  Width="100" Height="60" Click="AutoRedact_PlayPB_Click"/>
+                    <RibbonButton x:Name="AutoRedact_PausePB" Content="Pause" LargeImageSource="Images/pause.png"
                                   IsEnabled="False"
-                                  Width="100" Height="60" Click="AutoRedactRibbon_PausePB_Click"/>
-                    <RibbonButton x:Name="AutoRedactRibbon_StopPB" Content="Stop" LargeImageSource="Images/stop.png"
+                                  Width="100" Height="60" Click="AutoRedact_PausePB_Click"/>
+                    <RibbonButton x:Name="AutoRedact_StopPB" Content="Stop" LargeImageSource="Images/stop.png"
                                   IsEnabled="False"
-                                  Width="100" Height="60" Click="AutoRedactRibbon_StopPB_Click"/>
+                                  Width="100" Height="60" Click="AutoRedact_StopPB_Click"/>
                 </RibbonGroup>
             </RibbonTab>
 
-            <RibbonTab x:Name="ManualRibbonTab" Header="Manual">
-                
-                <RibbonGroup Header="Mode">
-                    <ToggleButton x:Name="TrackPB" Click="TrackPB_Click" IsThreeState="True" IsChecked="{Binding trackingEnabled}"
-                                  HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+            <RibbonTab x:Name="ManualRibbonTab" Header="Manual" VerticalAlignment="Center">
+
+                <RibbonGroup Width="100"/>
+
+                <RibbonGroup Header="" Height="64">
+                    <GroupBox x:Name="NavigateGroupBox" Header="Navigate" Margin="0,-12,0,-12">
+
+                    <Grid x:Name="ControlButtonGrid" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                            <Button Grid.Column="0" x:Name="PrevFastPB" Width="24" Height="24" Margin="8,1,8,1"                     
+                    Click="PrevFastPB_Click">
+                            <Button.Content>
+                                    <Image Width="16" Height="16" Stretch="Uniform" Source="Images/fast_rewind.png"/>
+                            </Button.Content>
+                        </Button>
+                            <Button Grid.Column="1" x:Name="PrevPB"     Width="24" Height="24" Margin="8,1,8,1" 
+                    Click="PrevPB_Click">
+                            <Button.Content>
+                                    <Image Width="16" Height="16" Stretch="Uniform" Source="Images/back.png"/>
+                            </Button.Content>
+                        </Button>
+                            <Button Grid.Column="2" x:Name="ForwPB"     Width="24" Height="24" Margin="8,1,8,1" 
+                    Click="ForwPB_Click">
+                            <Button.Content>
+                                    <Image Width="16" Height="16" Stretch="Uniform" Source="Images/play.png"/>
+                            </Button.Content>
+                        </Button>
+                            <Button Grid.Column="3" x:Name="ForwFastPB" Width="24" Height="24" Margin="8,1,8,1" 
+                    Click="ForwFastPB_Click">
+                            <Button.Content>
+                                    <Image Width="16" Height="16" Stretch="Uniform" Source="Images/fast_forward.png"/>
+                            </Button.Content>
+                        </Button>
+
+                    </Grid>
+                    </GroupBox>
+
+                </RibbonGroup>
+
+                <RibbonGroup Width="100"/>
+
+                <RibbonGroup Header="" Height="64">
+
+                    <GroupBox x:Name="TrackGroupBox" Header="Track" Margin="0,-12,0,-12">
+
+                        <Grid>
+
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                        
+                            <ToggleButton Grid.Column="0" x:Name="TrackPB" IsThreeState="False" IsChecked="{Binding trackingEnabled}" Width="24" Height="24"
+                                           Margin="8,1,8,1"
+                                  HorizontalContentAlignment="Center" VerticalContentAlignment="Center" 
+                                  Checked="TrackPB_Checked"
+                                  Unchecked="TrackPB_Unchecked">
                         <ToggleButton.Content>
-                            <Image Source="Images/target.png" />
+                            <Image Source="Images/target.png" Width="16" Height="16" />
                         </ToggleButton.Content>
                         <ToggleButton.Style>
                             <Style TargetType="{x:Type ToggleButton}">
@@ -79,51 +140,32 @@
                         </ToggleButton.Style>
 
                     </ToggleButton>
+
+                            <Button Grid.Column="1" x:Name="TrackStepForwPB" Width="24" Height="24" Margin="8,1,8,1" Click="TrackStepForwPB_Click">
+                                <Button.Content>
+                                    <Image Width="16" Height="16" Stretch="Uniform" Source="Images/play.png"/>
+                                </Button.Content>
+                            </Button>
+
+                            <Button Grid.Column="2" x:Name="TrackRunForwPB" Width="24" Height="24" Margin="8,1,8,1" Click="TrackRunForwPB_Click">
+                                <Button.Content>
+                                    <Image Width="16" Height="16" Stretch="Uniform" Source="Images/fast_forward.png"/>
+                                </Button.Content>
+                            </Button>
+
+                            <TextBox Grid.Column="3" Background="Transparent" Foreground="Red" FontSize="14" BorderBrush="Transparent"
+                             Margin="12,1,2,1" Text="{Binding manualMessage}"/>
+
+                        </Grid>
+                    </GroupBox>
                 </RibbonGroup>
 
-                <RibbonGroup Width="100">
-                    
+                <RibbonGroup>
+                    <GroupBox>
+                        <Button Content="Test" x:Name="TestPB" Click="TestPB_Click"/>
+                    </GroupBox>
                 </RibbonGroup>
 
-                <RibbonGroup Header="Navigation">
-
-                    <Grid x:Name="ControlButtonGrid" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-
-                        <Button Grid.Column="0" x:Name="PrevFastPB" Width="32" Height="32" Margin="8,4,8,4"                     
-                    Click="PrevFastPB_Click">
-                            <Button.Content>
-                                <Image Width="24" Height="24" Stretch="Uniform" Source="Images/fast_rewind.png"/>
-                            </Button.Content>
-                        </Button>
-                        <Button Grid.Column="1" x:Name="PrevPB"     Width="32" Height="32" Margin="8,4,8,4" 
-                    Click="PrevPB_Click">
-                            <Button.Content>
-                                <Image Width="24" Height="24" Stretch="Uniform" Source="Images/back.png"/>
-                            </Button.Content>
-                        </Button>
-                        <Button Grid.Column="2" x:Name="ForwPB"     Width="32" Height="32" Margin="8,4,8,4" 
-                    Click="ForwPB_Click">
-                            <Button.Content>
-                                <Image Width="24" Height="24" Stretch="Uniform" Source="Images/play.png"/>
-                            </Button.Content>
-                        </Button>
-                        <Button Grid.Column="3" x:Name="ForwFastPB" Width="32" Height="32" Margin="8,4,8,4" 
-                    Click="ForwFastPB_Click">
-                            <Button.Content>
-                                <Image Width="24" Height="24" Stretch="Uniform" Source="Images/fast_forward.png"/>
-                            </Button.Content>
-                        </Button>
-
-                    </Grid>
-
-                </RibbonGroup>
-                
             </RibbonTab>
 
             <RibbonTab x:Name="PlayerRibbonTab" Header="Player">
@@ -256,6 +298,9 @@
                                         <TextBlock Text="{Binding box.x2}"/>
                                         <TextBlock Text=","/>
                                         <TextBlock Text="{Binding box.y2}"/>
+                                        <TextBlock Text="("/>
+                                        <TextBlock Text="{Binding type}"/>
+                                        <TextBlock Text=")"/>
                                     </StackPanel>
                                 </DataTemplate>
                             </ListView.ItemTemplate>
@@ -281,7 +326,7 @@
         </TabControl>
 
         <videotools:VideoNavigator Grid.Row="2" x:Name="videoNavigator"
-              HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+              HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
 
     </Grid>
 </Window>

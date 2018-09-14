@@ -194,21 +194,26 @@ namespace VideoTools
         private void LowerSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             RangeSliderEventArgs e1 = new RangeSliderEventArgs(LowerSlider.Value, UpperSlider.Value, CurrentSlider.Value);
-            OnRangedChanged(e1);
+            //OnRangedChanged(e1);
         }
 
         private void UpperSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             RangeSliderEventArgs e1 = new RangeSliderEventArgs(LowerSlider.Value, UpperSlider.Value, CurrentSlider.Value);
-            OnRangedChanged(e1);
+            //OnRangedChanged(e1);
         }
 
         private void CurrentSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             RangeSliderEventArgs e1 = new RangeSliderEventArgs(LowerSlider.Value, UpperSlider.Value, CurrentSlider.Value);
-            OnRangedChanged(e1);
+            //OnRangedChanged(e1);
         }
 
+        private void HorizontalThumb_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+        {
+            RangeSliderEventArgs e1 = new RangeSliderEventArgs(LowerSlider.Value, UpperSlider.Value, CurrentSlider.Value);
+            OnRangedChanged(e1);
+        }
     }
 
 

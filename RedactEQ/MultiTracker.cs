@@ -162,7 +162,7 @@ namespace DNNTools
             {
                 //CorrelationTracker tracker = new CorrelationTracker();
                 CVTracker tracker = new CVTracker();
-                bool success = tracker.Init("CSRT");
+                bool success = tracker.Init(TrackerType.KCF);
                 if (success)
                 {
                     int x1 = (int)(box.x1 * (float)width);

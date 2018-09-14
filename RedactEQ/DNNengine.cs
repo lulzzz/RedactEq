@@ -1,10 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Dataflow;
@@ -18,7 +16,24 @@ using VideoTools;
 
 namespace DNNTools
 {
-    class DNNengine
+    public class ImagePackage
+    {
+        public byte[] data;
+        public double timestamp;
+        public int width;
+        public int height;
+        public int numChannels;
+        public ImagePackage(byte[] ImageData, double Timestamp, int Width, int Height, int NumChannels)
+        {
+            data = ImageData;
+            timestamp = Timestamp;
+            width = Width;
+            height = Height;
+            numChannels = NumChannels;
+        }
+    }
+
+    public class DNNengine
     {
         private TFGraph m_graph;
         private TFSession m_session;
@@ -71,11 +86,21 @@ namespace DNNTools
         }
 
 
-        public List<BoundingBox> EvalImageFile(string filename, float minConfidence)
+        public List<BoundingBox> EvalImageFile(string filename, int targetWidth, int targetHeight, float minConfidence)
         {
             List<BoundingBox> boxList = new List<BoundingBox>();
 
-            var tensor = ImageUtil.CreateTensorFromImageFile(filename, TFDataType.UInt8);
+            var tensor = ImageUtil.CreateTensorFromImageFile(filename, targetWidth, targetHeight,  TFDataType.UInt8);
+           
+
+            // TEMP
+            IntPtr ptr = tensor.Data;
+            byte[] bytes = new byte[100];
+            Marshal.Copy(ptr, bytes, 0, 100);
+
+            // END TEMP
+
+
             var runner = m_session.GetRunner();
 
             runner
@@ -120,6 +145,14 @@ namespace DNNTools
 
             var tensor = ImageUtil.CreateTensorFromBuffer(imageData, width, height, numChannels, resizeWidth, resizeHeight, TFDataType.UInt8);
 
+           
+            // TEMP
+            IntPtr ptr = tensor.Data;
+            byte[] bytes = new byte[100];
+            Marshal.Copy(ptr, bytes, 0, 100);
+
+            // END TEMP
+
             var runner = m_session.GetRunner();
 
             runner
@@ -163,36 +196,38 @@ namespace DNNTools
 
 
 
-        public List<BoundingBox> NonMaxSuppression(List<BoundingBox> inputBoxes)
-        {
-            List<BoundingBox> outputBoxes = new List<BoundingBox>();
+        //public List<BoundingBox> NonMaxSuppression(List<BoundingBox> inputBoxes)
+        //{
+        //    List<BoundingBox> outputBoxes = new List<BoundingBox>();
 
-            // array of picked indices
-            List<int> pick = new List<int>();
+        //    // array of picked indices
+        //    List<int> pick = new List<int>();
 
-            // array of each box coordinate
-            List<float> x1List = inputBoxes.Select(x => x.x1).ToList();
-            List<float> y1List = inputBoxes.Select(x => x.y1).ToList();
-            List<float> x2List = inputBoxes.Select(x => x.x2).ToList();
-            List<float> y2List = inputBoxes.Select(x => x.y2).ToList();
+        //    // array of each box coordinate
+        //    List<float> x1List = inputBoxes.Select(x => x.x1).ToList();
+        //    List<float> y1List = inputBoxes.Select(x => x.y1).ToList();
+        //    List<float> x2List = inputBoxes.Select(x => x.x2).ToList();
+        //    List<float> y2List = inputBoxes.Select(x => x.y2).ToList();
 
-            // calculate area array
-            List<float> area = new List<float>();
-            foreach (BoundingBox box in inputBoxes)
-                area.Add((box.x2 - box.x1) * (box.y2 - box.y1));
+        //    // calculate area array
+        //    List<float> area = new List<float>();
+        //    foreach (BoundingBox box in inputBoxes)
+        //        area.Add((box.x2 - box.x1) * (box.y2 - box.y1));
 
-            List<float> idxs = new List<float>();
-            foreach (float val in y2List) idxs.Add(val);
-            idxs.Sort();
+        //    List<float> idxs = new List<float>();
+        //    foreach (float val in y2List) idxs.Add(val);
+        //    idxs.Sort();
 
-            // keep looping while some indexes still remain in the indexes list
-            while (idxs.Count > 0)
-            {
+        //    // keep looping while some indexes still remain in the indexes list
+        //    while (idxs.Count > 0)
+        //    {
 
-            }
+        //    }
 
-            return outputBoxes;
-        }
+            
+
+        //    return outputBoxes;
+        //}
      
 
         ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -203,7 +238,7 @@ namespace DNNTools
 
 
 
-        public ITargetBlock<Tuple<byte[], double, int, int, int, WriteableBitmap, bool>> CreateDNNPipeline(
+        public ITargetBlock<Tuple<ImagePackage, WriteableBitmap, WriteableBitmap, bool>> CreateDNNPipeline(
             string modelFile, Dictionary<int, string> classes,
             VideoEditsDatabase editsDB,
             int analysisWidth, int analysisHeight, TFDataType destinationDataType, float minConfidence, TextBlock tb1, TextBlock tb2,           
@@ -228,7 +263,7 @@ namespace DNNTools
             TaskScheduler l_uiTask = uiTask;
             TextBlock l_numDetectionsTextBlock = tb1;
             TextBlock l_numTrackersTextBlock = tb2;
-
+            
             CentroidTracker m_tracker = new CentroidTracker(10);
 
             VideoEditsDatabase l_editsDB = editsDB;
@@ -302,29 +337,26 @@ namespace DNNTools
             ////////////////////////////////////////////////////////////////////////////////////////////////
             // DATAFLOW BLOCKS
 
-            var PreprocessImage = new TransformBlock<Tuple<byte[], double, int, int, int, WriteableBitmap, bool>, 
-                                                     Tuple<byte[], double, int, int, WriteableBitmap, TFTensor, bool>>(inputData =>
+            var PreprocessImage = new TransformBlock<Tuple<ImagePackage, WriteableBitmap, WriteableBitmap, bool>, 
+                                                     Tuple<ImagePackage, WriteableBitmap, WriteableBitmap, bool, TFTensor>>(inputData =>
                   {
                       // INPUTS:
-                      //  item 1 - image data array
-                      //  item 2 - timestamp of image
-                      //  item 3 - image pixel width
-                      //  item 4 - image pixel height
-                      //  item 5 - image number of channels
-                      //  item 6 - bitmap, if not null, will be used to display results
-                      //  item 7 - bool flag indicating whether to turn on/off NonMaximumSuppression (getting rid of overlapping boxes)
-                      //  item 8 - bool flag indicating whether to enable tracking
+                      //  item 1 - ImagePackage which contains: image data (byte[]), timestamp (double), width (int), height (int), numchannels (int)
+                      //  item 2 - bitmap used to display image
+                      //  item 3 - bitmap used to display overlay (where rectangle is draw)
+                      //  item 4 - bool flag indicating whether to enable tracking
 
                       // OUTPUT:
                       //  tensor holding the preprocessed image
-
-                      byte[] data = inputData.Item1;
-                      double timestamp = inputData.Item2;
-                      int imageWidth = inputData.Item3;
-                      int imageHeight = inputData.Item4;
-                      int numChannels = inputData.Item5;
-                      WriteableBitmap bitmap = inputData.Item6;
-                      bool useTracker = inputData.Item7;
+                      ImagePackage imagePackage = inputData.Item1;
+                      byte[] data =         imagePackage.data;
+                      double timestamp =    imagePackage.timestamp;
+                      int imageWidth =      imagePackage.width;
+                      int imageHeight =     imagePackage.height;
+                      int numChannels =     imagePackage.numChannels;
+                      WriteableBitmap bitmap =  inputData.Item2;
+                      WriteableBitmap overlay = inputData.Item3;
+                      bool useTracker =     inputData.Item4;
 
                       try
                       {
@@ -337,8 +369,7 @@ namespace DNNTools
                                       inputValues: new[] { rawInputTensor },
                                       outputs: new[] { l_preprocessOutput });
 
-                         return Tuple.Create<byte[],double, int, int, WriteableBitmap, TFTensor, bool>(data, timestamp, imageWidth, imageHeight, 
-                                                                                                      bitmap, preprocessed[0], useTracker);
+                         return Tuple.Create<ImagePackage, WriteableBitmap, WriteableBitmap, bool, TFTensor>(imagePackage, bitmap, overlay, useTracker, preprocessed[0]);
                       }
                       catch (Exception ex)
                       {
@@ -355,28 +386,30 @@ namespace DNNTools
 
 
 
-           var EvaluateImage = new TransformBlock<Tuple<byte[],double,int,int,WriteableBitmap,TFTensor,bool>, Tuple<byte[],double,int,int,WriteableBitmap,List<BoundingBox>,int>>(inputData =>
+           var EvaluateImage = new TransformBlock<Tuple<ImagePackage, WriteableBitmap, WriteableBitmap, bool, TFTensor>, 
+                                                  Tuple<ImagePackage, WriteableBitmap, WriteableBitmap, List<BoundingBox>,int>>(inputData =>
            {
                // INPUTS:
-               //  item 1 - image data array
-               //  item 2 - image pixel width
-               //  item 3 - image pixel height
-               //  item 4 - image number of channels
-               //  item 5 - bitmap, if not null, will be used to display results
-               //  item 6 - bool flag indicating whether to turn on/off NonMaximumSuppression (getting rid of overlapping boxes)
-               //  item 7 - bool flag indicating whether to enable tracking
+               //  item 1 - ImagePackage which contains: image data (byte[]), timestamp (double), width (int), height (int), numchannels (int)
+               //  item 2 - bitmap used to display image
+               //  item 3 - bitmap used to display overlay (where rectangle is draw)
+               //  item 4 - bool flag indicating whether to enable tracking
+               //  item 5 - Tensorflow Tensor holding the preprocessed image ready for submission to the DNN
+
                // OUTPUTS:
                //  list of bounding boxes of detected objects
-               //  number of detections from the DNN
                //  number of active trackers
 
-               byte[] data = inputData.Item1;
-               double timestamp = inputData.Item2;
-               int imageWidth = inputData.Item3;
-               int imageHeight = inputData.Item4;
-               WriteableBitmap bitmap = inputData.Item5;
-               TFTensor tensor = inputData.Item6;
-               bool useTracker = inputData.Item7;
+               ImagePackage imagePackage = inputData.Item1;
+               byte[] data =        imagePackage.data;
+               double timestamp =   imagePackage.timestamp;
+               int imageWidth =     imagePackage.width;
+               int imageHeight =    imagePackage.height;
+               WriteableBitmap bitmap = inputData.Item2;
+               WriteableBitmap overlay = inputData.Item3;
+               bool useTracker = inputData.Item4;
+               TFTensor tensor = inputData.Item5;
+               
 
                int numDetections = 0;
                int numTrackers = 0;
@@ -420,7 +453,12 @@ namespace DNNTools
                    boxList = m_nms.Execute(boxList, 0.50f);
 
                    // add boxes to edits database
-                   //l_editsDB.AddRedactionBoxesFromDNN(boxList, timestamp, imageWidth, imageHeight);
+                   int ii = 0;
+                   if (boxList.Count > 0)
+                   {
+                       ii++;
+                   }
+                   l_editsDB.AddRedactionBoxesFromDNN(boxList, timestamp, imageWidth, imageHeight);
 
                    numDetections = boxList.Count;
 
@@ -439,7 +477,7 @@ namespace DNNTools
                        m_multiTracker.ClearTrackers();
                    }
 
-                   return Tuple.Create<byte[],double,int,int,WriteableBitmap,List<BoundingBox>,int>(data,timestamp,imageWidth,imageHeight,bitmap,boxList,numTrackers);
+                   return Tuple.Create<ImagePackage, WriteableBitmap, WriteableBitmap, List<BoundingBox>, int>(imagePackage,bitmap,overlay,boxList,numTrackers);
                }
                catch (Exception ex)
                {
@@ -457,16 +495,19 @@ namespace DNNTools
 
 
 
-            var PlotResults = new ActionBlock<Tuple<byte[],double,int,int,WriteableBitmap,List<BoundingBox>,int>>(inputData =>
+            var PlotResults = new ActionBlock<Tuple<ImagePackage, WriteableBitmap, WriteableBitmap, List<BoundingBox>, int>>(inputData =>
             {
-                byte[] data = inputData.Item1;
-                double timestamp = inputData.Item2;
-                int imageWidth = inputData.Item3;
-                int imageHeight = inputData.Item4;
-                WriteableBitmap bitmap = inputData.Item5;
-                List<BoundingBox> boxes = inputData.Item6;
+                ImagePackage imagePackage = inputData.Item1;
+                byte[] data = imagePackage.data;
+                double timestamp = imagePackage.timestamp;
+                int imageWidth = imagePackage.width;
+                int imageHeight = imagePackage.height;
+                int numChannels = imagePackage.numChannels;
+                WriteableBitmap bitmap = inputData.Item2;
+                WriteableBitmap overlay = inputData.Item3;
+                List<BoundingBox> boxes = inputData.Item4;
                 int numDetections = boxes.Count;
-                int numTrackers = inputData.Item7;
+                int numTrackers = inputData.Item5;
 
                 try
                 {
@@ -503,19 +544,20 @@ namespace DNNTools
                         bitmap.Unlock();
                     }
 
+                    overlay.Clear();
                     foreach (BoundingBox box in boxes)
                     {
                         int x1 = (int)(box.x1 * bitmap.PixelWidth);
                         int y1 = (int)(box.y1 * bitmap.PixelHeight);
                         int x2 = (int)(box.x2 * bitmap.PixelWidth);
                         int y2 = (int)(box.y2 * bitmap.PixelHeight);
-                        bitmap.DrawRectangle(x1, y1, x2, y2, Colors.Red);
-                        bitmap.DrawRectangle(x1 + 1, y1 + 1, x2 - 1, y2 - 1, Colors.Red);
-                        //bitmap.DrawRectangle(x1 + 2, y1 + 2, x2 - 2, y2 - 2, Colors.Red);
-                        //bitmap.FillRectangle(x1, y1, x2, y2, Colors.Red);
+                        overlay.DrawRectangle(x1, y1, x2, y2, Colors.Red);
+                        overlay.DrawRectangle(x1 + 1, y1 + 1, x2 - 1, y2 - 1, Colors.Red);
+                        overlay.DrawRectangle(x1 + 2, y1 + 2, x2 - 2, y2 - 2, Colors.Red);
+                        //overlay.FillRectangle(x1, y1, x2, y2, Colors.Red);
                     }
 
-                    if(l_numDetectionsTextBlock != null)  l_numDetectionsTextBlock.Text = numDetections.ToString();
+                    if (l_numDetectionsTextBlock != null)  l_numDetectionsTextBlock.Text = numDetections.ToString();
                     if(l_numTrackersTextBlock != null) l_numTrackersTextBlock.Text = numTrackers.ToString();
                     
                 }

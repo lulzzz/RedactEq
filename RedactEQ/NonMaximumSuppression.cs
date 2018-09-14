@@ -159,6 +159,40 @@ namespace DNNTools
             return outBoxes;
         }
 
+
+        public List<BoundingBox> Execute(List<BoundingBox> boxes1, List<BoundingBox> boxes2, float threshold)
+        {
+            List<BoundingBox> outBoxes = new List<BoundingBox>();
+
+            IntPtr pData = IntPtr.Zero;
+            int count;
+
+            // combine the lists
+            List<BoundingBox> boxesAll = new List<BoundingBox>();
+            foreach (BoundingBox box1 in boxes1) boxesAll.Add(box1);
+            foreach (BoundingBox box2 in boxes2) boxesAll.Add(box2);
+
+            bool success = NMS_Execute(nms, boxesAll.ToArray(), boxesAll.Count, threshold, out pData, out count);
+
+            if (success)
+            {
+                var sizeInBytes = Marshal.SizeOf(typeof(BoundingBox));
+
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr ins = new IntPtr(pData.ToInt64() + i * sizeInBytes);
+                    BoundingBox bb = Marshal.PtrToStructure<BoundingBox>(ins);
+                    outBoxes.Add(bb);
+                }
+
+                Release(pData);
+            }
+
+            return outBoxes;
+        }
+
+
+
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
