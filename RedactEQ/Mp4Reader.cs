@@ -15,17 +15,21 @@ namespace VideoTools
 
         public byte[] data;
         public bool key;
+        public bool finished;
+        public int frameIndex;
         public int width;
         public int height;
         public List<DNNTools.BoundingBox> boxList;
-        public ProgressStruct(double tstamp, long leng, byte[] imageData, bool isKeyFrame, int w, int h, List<DNNTools.BoundingBox> BoxList = null)
+        public ProgressStruct(double tstamp, long leng, byte[] imageData, int FrameIndex, bool isKeyFrame, bool isFinished,  int w, int h, List<DNNTools.BoundingBox> BoxList = null)
         {
             timestamp = tstamp;
             length = leng;
             data = imageData;
+            frameIndex = FrameIndex;
             width = w;
             height = h;
             key = isKeyFrame;
+            finished = isFinished;
             boxList = BoxList;
         }
     }
@@ -128,7 +132,7 @@ namespace VideoTools
 
                                     byte[] frameCopy = new byte[targetWidth * targetHeight * 3];
                                     Buffer.BlockCopy(frame, 0, frameCopy, 0, targetWidth * targetHeight * 3);
-                                    prog = new ProgressStruct(timestamp, durationMilliseconds, frameCopy, key, targetWidth, targetHeight);
+                                    prog = new ProgressStruct(timestamp, durationMilliseconds, frameCopy, m_frameCount, key, false, targetWidth, targetHeight);
 
                                     if (progress != null && prog.data != null)
                                     {
@@ -161,7 +165,7 @@ namespace VideoTools
                         finally
                         {
                             Mp4.DestroyMp4Reader(mp4Reader);
-                            progress.Report(new ProgressStruct(-1,0,null,false,0,0)); // signal that the plater stopped (timestamp = -1)
+                            progress.Report(new ProgressStruct(-1,0,null,0,false,true,0,0)); // signal that the player stopped (timestamp = -1)
                         }
                     }
                     else
@@ -186,14 +190,14 @@ namespace VideoTools
     int decodeWidth, int decodeHeight, double startTimestamp, double endTimestamp, DNNTools.DNNengine dnnEngine, float confidence, bool useTracker,
     CancellationTokenSource tokenSource,
     WPFTools.PauseTokenSource pauseTokenSource,
-    bool paceOutput)
+    bool paceOutput, Dictionary<double, int> frameIndexLookup)
         {
             //construct Progress<T>, passing ReportProgress as the Action<T> 
             var progressIndicator = new Progress<ProgressStruct>(newFrameHandler);
 
             //call async method
             long position = await PlayMp4FileAsync_1(filename, decodeWidth, decodeHeight, startTimestamp, endTimestamp, dnnEngine, confidence, useTracker,
-                progressIndicator, tokenSource.Token, pauseTokenSource.Token, paceOutput);
+                progressIndicator, tokenSource.Token, pauseTokenSource.Token, paceOutput, frameIndexLookup);
         }
 
 
@@ -202,7 +206,7 @@ namespace VideoTools
             DNNTools.DNNengine dnnEngine, float confidence, bool useTracker,
             IProgress<ProgressStruct> progress,
             CancellationToken token, WPFTools.PauseToken pauseToken,
-            bool paceOutput)
+            bool paceOutput, Dictionary<double, int> frameIndexLookup)
         {
             // path - filename/path to Mp4 file
             // startingAt - point in time to start decoding/playback, given in milliseconds
@@ -218,8 +222,16 @@ namespace VideoTools
                 {
                     double timestamp = 0.0f;
                     Stopwatch sw = new Stopwatch();
+                    IntPtr mp4Reader = IntPtr.Zero;
 
-                    IntPtr mp4Reader = Mp4.CreateMp4Reader(path);
+                    try
+                    {
+                        mp4Reader = Mp4.CreateMp4Reader(path);
+                    }
+                    catch(Exception ex)
+                    {
+                        string message = ex.Message;
+                    }
 
                     DNNTools.NonMaximumSuppression nms = new DNNTools.NonMaximumSuppression();
                     nms.Init();
@@ -258,24 +270,57 @@ namespace VideoTools
                                 // move to starting position
                                 double actualStart = Mp4.SetTimePositionAbsolute(mp4Reader, startTimestamp);
 
-                                while (true)
+                               
+
+                                // create flag used to quit early
+                                bool running = true;
+
+
+                                if (actualStart == -1) // failed to move to start position
+                                {
+                                    running = false;
+                                }
+
+
+                                sw.Start();
+
+                                int frameIndex = 0;
+
+                                while (running)
                                 {
                                     timestamp = (double)Mp4.GetNextVideoFrame(mp4Reader, frame, out key, targetWidth, targetHeight) / 1000.0;
 
-                                    if (timestamp == -1)   // EOF                             
+                                    if (timestamp == -0.001)   // EOF                             
                                     {
+                                        running = false;
                                         break;
                                     }
 
                                     if (token.IsCancellationRequested)
                                     {
                                         // pause or stop requested
+                                        running = false;
                                         break;
                                     }
+                                    
+                                    if(key)
+                                    {
+                                        // get frame index for this key frame
+                                        int tempIndex = 0;
+                                        if(frameIndexLookup.TryGetValue(timestamp,out tempIndex))
+                                        {
+                                            frameIndex = tempIndex;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        frameIndex++;
+                                    }
+
 
                                     byte[] frameCopy = new byte[targetWidth * targetHeight * 3];
                                     Buffer.BlockCopy(frame, 0, frameCopy, 0, targetWidth * targetHeight * 3);
-                                    prog = new ProgressStruct(timestamp, durationMilliseconds, frameCopy, key, targetWidth, targetHeight);
+                                    prog = new ProgressStruct(timestamp, durationMilliseconds, frameCopy, frameIndex, key, !running, targetWidth, targetHeight);
 
                                     if (dnnEngine != null)
                                     {
@@ -333,8 +378,15 @@ namespace VideoTools
                         }
                         finally
                         {
-                            Mp4.DestroyMp4Reader(mp4Reader);
-                            progress.Report(new ProgressStruct(-1, 0, null, false, 0, 0)); // signal that the plater stopped (timestamp = -1)
+                            try
+                            {
+                                Mp4.DestroyMp4Reader(mp4Reader);
+                            }
+                            catch(Exception ex)
+                            {
+                                string message = ex.Message;
+                            }
+                            progress.Report(new ProgressStruct(-0.001, 0, null, m_frameCount,false,true , 0, 0)); // signal that the player stopped (timestamp = -0.001)
                         }
                     }
                     else

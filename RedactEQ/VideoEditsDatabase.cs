@@ -1,8 +1,10 @@
-﻿using System;
+﻿using DNNTools;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Windows.Media;
 
 namespace VideoTools
 {
@@ -88,6 +90,8 @@ namespace VideoTools
         string m_databaseFilename;
         string m_errorMsg;
 
+        int m_minimumRedactionSize = 8;
+
         public ObservableConcurrentDictionary<double, ObservableCollection<FrameEdit>> m_editsDictionary;
 
         // Events
@@ -97,6 +101,8 @@ namespace VideoTools
         {
             if (VideoEditsDatabaseEvent != null) VideoEditsDatabaseEvent(this, e);
         }
+
+
 
         public VideoEditsDatabase(string mp4Filename)
         {
@@ -127,20 +133,34 @@ namespace VideoTools
             return mp4Filename.Replace(".mp4", "_editsDB.dat");
         }
 
+        public void SetMinimumRedactionSize(int size)
+        {
+            m_minimumRedactionSize = size;
+        }
+
 
         public void AddFrameEdit(double timestamp, FRAME_EDIT_TYPE type, BoundingBox bbox)
         {
-            if(m_editsDictionary.ContainsKey(timestamp))
+            if (bbox.x2 - bbox.x1 > m_minimumRedactionSize && bbox.y2 - bbox.y1 > m_minimumRedactionSize) // make sure bounding box is big enough
             {
-                ObservableCollection<FrameEdit> list = m_editsDictionary[timestamp];
-                list.Add(new FrameEdit(type,bbox));                
+                if (m_editsDictionary.ContainsKey(timestamp))
+                {
+                    ObservableCollection<FrameEdit> list = m_editsDictionary[timestamp];
+                    list.Add(new FrameEdit(type, bbox));
+                }
+                else
+                {
+                    ObservableCollection<FrameEdit> list = new ObservableCollection<FrameEdit>();
+                    list.Add(new FrameEdit(type, bbox));
+                    m_editsDictionary.Add(timestamp, list);
+                }
             }
-            else
-            {
-                ObservableCollection<FrameEdit> list = new ObservableCollection<FrameEdit>();
-                list.Add(new FrameEdit(type, bbox));
-                m_editsDictionary.Add(timestamp, list);
-            }
+        }
+
+
+        public void Perform_NMS_on_All(NonMaximumSuppression nms)
+        {
+
         }
 
 
@@ -191,7 +211,7 @@ namespace VideoTools
 
             return list;
         }
-
+        
 
         public List<DNNTools.BoundingBox> GetBoundingBoxesForTimestamp(double timestamp, int width, int height)
         {
@@ -247,6 +267,13 @@ namespace VideoTools
             }
         }
 
+        public void UpdateRedactions(double timestamp, List<DNNTools.BoundingBox> boxList, int imageWidth, int imageHeight)
+        {
+            m_editsDictionary.Remove(timestamp);
+
+            AddRedactionBoxesFromDNN(boxList, timestamp, imageWidth, imageHeight);
+        }
+
 
         public void AddRedactionBoxesFromDNN(List<DNNTools.BoundingBox> boxList, double timestamp, int imageWidth, int imageHeight)
         {
@@ -256,9 +283,33 @@ namespace VideoTools
                 int y1 = (int)(box.y1 * imageHeight);
                 int x2 = (int)(box.x2 * imageWidth);
                 int y2 = (int)(box.y2 * imageHeight);
-                VideoTools.BoundingBox bbox = new VideoTools.BoundingBox(x1,y1,x2,y2);
-                AddFrameEdit(timestamp, FRAME_EDIT_TYPE.AUTO_REDACTION, bbox);
+                if (x2 - x1 > m_minimumRedactionSize  && y2 - y1 > m_minimumRedactionSize) // make sure bounding box is big enough
+                {
+                    VideoTools.BoundingBox bbox = new VideoTools.BoundingBox(x1, y1, x2, y2);
+                    AddFrameEdit(timestamp, FRAME_EDIT_TYPE.AUTO_REDACTION, bbox);
+                }
             }
+        }
+
+
+        public void RemoveAllEdits()
+        {   
+            List<double> keyList = new List<double>();
+
+            foreach(KeyValuePair<double,ObservableCollection<FrameEdit>> item in m_editsDictionary)
+            {
+                keyList.Add(item.Key);
+            }
+
+            foreach (double key in keyList)
+            {
+                ObservableCollection<FrameEdit> list;
+                if(m_editsDictionary.TryGetValue(key, out list))
+                {
+                    list.Clear();
+                    m_editsDictionary.Remove(key);
+                }
+            }            
         }
 
 

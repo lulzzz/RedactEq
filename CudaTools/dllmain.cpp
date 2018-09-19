@@ -37,7 +37,12 @@ DllExport void Shutdown_CudaTools(CudaTools* p_CudaTools)
 }
 
 
-DllExport void RedactAreas(CudaTools* p_CudaTools, uchar3* imageIn, uchar3* imageOut, int width, int height, int4* rects, int numRects, int blockSize)
+DllExport uchar3* RedactAreas(CudaTools* p_CudaTools, uchar3* imageIn, int width, int height, int4* rects, int numRects, int blockSize)
 {
-	p_CudaTools->RedactAreas(imageIn, imageOut, width, height, rects, numRects, blockSize);
+	return p_CudaTools->RedactAreas(imageIn, width, height, rects, numRects, blockSize);
+}
+
+DllExport void ReleaseMemory(void* ptr)
+{
+	free(ptr);
 }

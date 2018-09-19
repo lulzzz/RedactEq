@@ -14,6 +14,6 @@ public:
 	CudaTools();
 	~CudaTools();
 
-	void RedactAreas(uchar3* rgb_image_in, uchar3* rgb_image_out, int width, int height, int4* rects, int num_rects, int block_size);
+	uchar3* RedactAreas(uchar3* bgr_image_in, int width, int height, int4* rects, int num_rects, int block_size);	
 
 };

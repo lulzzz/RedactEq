@@ -22,6 +22,8 @@ namespace VideoTools
         double m_dragRange_startX;
         //int m_count;
 
+        private bool dragStarted = false;
+
         public delegate void RangeChangedEventHandler(object sender, RangeSliderEventArgs e);
         public event RangeChangedEventHandler RangeChanged;
         protected virtual void OnRangedChanged(RangeSliderEventArgs e)
@@ -33,35 +35,40 @@ namespace VideoTools
         public VideoNavigator()
         {
             this.InitializeComponent();
-            this.LayoutUpdated += new EventHandler(RangeSlider_LayoutUpdated);
+            //this.LayoutUpdated += new EventHandler(RangeSlider_LayoutUpdated);
             //m_count = 0;
+            TickPositions = new DoubleCollection() { 0 };
+            MarkerPositions = new DoubleCollection() { 0 };
         }
 
         void RangeSlider_LayoutUpdated(object sender, EventArgs e)
         {
-            SetProgressBorder();
-            SetLowerValueVisibility();
+           
         }
 
-        private void SetProgressBorder()
-        {
-            double lowerPoint = (this.ActualWidth * (LowerValue - Minimum)) / (Maximum - Minimum);
-            double upperPoint = (this.ActualWidth * (UpperValue - Minimum)) / (Maximum - Minimum);
-            upperPoint = this.ActualWidth - upperPoint;
-            progressBorder.Margin = new Thickness(lowerPoint, 0, upperPoint, 0);
+ 
+        public void SetTickPositions(DoubleCollection ticks)
+        { 
+            TickPositions = ticks;
         }
 
-        public void SetLowerValueVisibility()
+        public void SetMarkerPositions(DoubleCollection markers)
         {
-            if (DisableLowerValue)
-            {
-                LowerSlider.Visibility = System.Windows.Visibility.Collapsed;
-            }
-            else
-            {
-                LowerSlider.Visibility = System.Windows.Visibility.Visible;
-            }
+            MarkerPositions = markers;
         }
+
+
+
+        public void SetTickPositions()
+        {
+            CurrentSlider.Ticks = TickPositions;
+        }
+
+        public void SetMarkerPositions()
+        {
+            CurrentSlider.Ticks = MarkerPositions;
+        }
+
 
         public double Minimum
         {
@@ -75,38 +82,29 @@ namespace VideoTools
             set { SetValue(MaximumProperty, value); }
         }
 
-        public double LowerValue
-        {
-            get { return (double)GetValue(LowerValueProperty); }
-            set { SetValue(LowerValueProperty, value); }
-        }
-
-        public double UpperValue
-        {
-            get { return (double)GetValue(UpperValueProperty); }
-            set { SetValue(UpperValueProperty, value); }
-        }
-
+  
         public double CurrentValue
         {
             get { return (double)GetValue(CurrentValueProperty); }
             set { SetValue(CurrentValueProperty, value); }
         }
 
-        public bool DisableLowerValue
+  
+        public DoubleCollection TickPositions
         {
-            get { return (bool)GetValue(DisableLowerValueProperty); }
-            set { SetValue(DisableLowerValueProperty, value); }
+            get { return (DoubleCollection)GetValue(TickPositionsProperty); }
+            set { SetValue(TickPositionsProperty, value); }
         }
+
+        public DoubleCollection MarkerPositions
+        {
+            get { return (DoubleCollection)GetValue(MarkerPositionsProperty); }
+            set { SetValue(MarkerPositionsProperty, value); }
+        }
+
 
         public static readonly DependencyProperty MinimumProperty =
             DependencyProperty.Register("Minimum", typeof(double), typeof(VideoNavigator), new UIPropertyMetadata(0d, new PropertyChangedCallback(PropertyChanged)));
-
-        public static readonly DependencyProperty LowerValueProperty =
-            DependencyProperty.Register("LowerValue", typeof(double), typeof(VideoNavigator), new UIPropertyMetadata(0d, new PropertyChangedCallback(PropertyChanged)));
-
-        public static readonly DependencyProperty UpperValueProperty =
-            DependencyProperty.Register("UpperValue", typeof(double), typeof(VideoNavigator), new UIPropertyMetadata(100d, new PropertyChangedCallback(PropertyChanged)));
 
         public static readonly DependencyProperty MaximumProperty =
             DependencyProperty.Register("Maximum", typeof(double), typeof(VideoNavigator), new UIPropertyMetadata(100d, new PropertyChangedCallback(PropertyChanged)));
@@ -114,105 +112,49 @@ namespace VideoTools
         public static readonly DependencyProperty CurrentValueProperty =
             DependencyProperty.Register("CurrentValue", typeof(double), typeof(VideoNavigator), new UIPropertyMetadata(0d, new PropertyChangedCallback(PropertyChanged)));
 
-        public static readonly DependencyProperty DisableLowerValueProperty =
-            DependencyProperty.Register("DisableLowerValue", typeof(bool), typeof(VideoNavigator), new UIPropertyMetadata(false, new PropertyChangedCallback(DisabledLowerValueChanged)));
+        public static readonly DependencyProperty TickPositionsProperty =
+          DependencyProperty.Register("TickPositions", typeof(DoubleCollection), typeof(VideoNavigator), new UIPropertyMetadata(null, new PropertyChangedCallback(TickPositionsValueChanged)));
 
-        private static void DisabledLowerValueChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        public static readonly DependencyProperty MarkerPositionsProperty =
+          DependencyProperty.Register("MarkerPositions", typeof(DoubleCollection), typeof(VideoNavigator), new UIPropertyMetadata(null, new PropertyChangedCallback(MarkerPositionsValueChanged)));
+
+
+        private static void TickPositionsValueChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             VideoNavigator slider = (VideoNavigator)d;
-            slider.SetLowerValueVisibility();
+            slider.SetTickPositions();
+        }
+
+        private static void MarkerPositionsValueChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            VideoNavigator slider = (VideoNavigator)d;
+            slider.SetMarkerPositions();
         }
 
         private static void PropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             VideoNavigator slider = (VideoNavigator)d;
-            if (e.Property == VideoNavigator.LowerValueProperty)
+            if (e.Property == VideoNavigator.CurrentValueProperty)
             {
-                slider.UpperSlider.Value = Math.Max(slider.UpperSlider.Value, slider.LowerSlider.Value);
-                slider.CurrentSlider.Value = Math.Max(slider.LowerSlider.Value, slider.CurrentSlider.Value);
-            }
-            else if (e.Property == VideoNavigator.UpperValueProperty)
+    
+            }         
+        }
+
+      
+   
+        private void Thumb_DragStarted(object sender, System.Windows.Controls.Primitives.DragStartedEventArgs e)
+        {
+            dragStarted = true;
+        }
+
+        private void Thumb_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+        {
+            if (dragStarted)
             {
-                slider.LowerSlider.Value = Math.Min(slider.UpperSlider.Value, slider.LowerSlider.Value);
-                slider.CurrentSlider.Value = Math.Min(slider.UpperSlider.Value, slider.CurrentSlider.Value);                
-            }
-            else if(e.Property == VideoNavigator.CurrentValueProperty)
-            {
-                slider.UpperSlider.Value = Math.Max(slider.UpperSlider.Value, slider.CurrentSlider.Value);
-                slider.LowerSlider.Value = Math.Min(slider.LowerSlider.Value, slider.CurrentSlider.Value);
-            }
-            slider.SetProgressBorder();
-        }
-
-        private void progressBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            m_dragRange_MouseDown = true;
-            m_dragRange_startX = e.GetPosition(this).X;
-        }
-
-        private void progressBorder_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-        {
-            m_dragRange_MouseDown = false;
-        }
-
-        private void progressBorder_MouseMove(object sender, MouseEventArgs e)
-        {
-            if (m_dragRange_MouseDown)
-            {
-                //m_count++;
-                double parentPixelWidth = LayoutRoot.ActualWidth;
-                double currentPos = e.GetPosition(this).X;
-                double pixelDelta = currentPos - m_dragRange_startX;
-                double percentMove = pixelDelta / parentPixelWidth;
-
-                double rangeDelta = percentMove * (Maximum - Minimum);
-
-                double newLowerValue = LowerValue + rangeDelta;
-                double newUpperValue = UpperValue + rangeDelta;
-
-                if (newLowerValue >= Minimum && newUpperValue <= Maximum)
-                {
-                    LowerValue = newLowerValue;
-                    UpperValue = newUpperValue;
-                    m_dragRange_startX = currentPos;
-                }
-            }
-
-            e.Handled = true;
-        }
-
-        private void LayoutRoot_MouseMove(object sender, MouseEventArgs e)
-        {
-            progressBorder_MouseMove(sender, e);
-        }
-
-        private void LayoutRoot_MouseLeave(object sender, MouseEventArgs e)
-        {
-            m_dragRange_MouseDown = false;
-        }
-
-        private void LowerSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            RangeSliderEventArgs e1 = new RangeSliderEventArgs(LowerSlider.Value, UpperSlider.Value, CurrentSlider.Value);
-            //OnRangedChanged(e1);
-        }
-
-        private void UpperSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            RangeSliderEventArgs e1 = new RangeSliderEventArgs(LowerSlider.Value, UpperSlider.Value, CurrentSlider.Value);
-            //OnRangedChanged(e1);
-        }
-
-        private void CurrentSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            RangeSliderEventArgs e1 = new RangeSliderEventArgs(LowerSlider.Value, UpperSlider.Value, CurrentSlider.Value);
-            //OnRangedChanged(e1);
-        }
-
-        private void HorizontalThumb_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
-        {
-            RangeSliderEventArgs e1 = new RangeSliderEventArgs(LowerSlider.Value, UpperSlider.Value, CurrentSlider.Value);
-            OnRangedChanged(e1);
+                RangeSliderEventArgs e1 = new RangeSliderEventArgs(Minimum, Maximum, CurrentValue);
+                OnRangedChanged(e1);
+                dragStarted = false;
+            }            
         }
     }
 

@@ -44,6 +44,9 @@ namespace VideoTools
                                               // value = GopRecord containing timestamp of key frame and numFrames in gop
 
         public SortedList<int,FrameRecord> m_frameCache; // key = frame index within entire movie, value = filename
+
+        public Dictionary<double, int> m_gopIndexLookup; // a convenience dictionary that makes it easy to get the frame index of a GOP give a timestamp
+
         int m_padding;
         string m_mp4Filename;
         string m_cacheDirectory;
@@ -81,6 +84,7 @@ namespace VideoTools
 
             m_gopList = new SortedList<int, GopRecord>();
             m_frameCache = new SortedList<int, FrameRecord>();
+            m_gopIndexLookup = new Dictionary<double, int>();
             m_gopsInCache = new List<int>();
             InitCache();                      
         }
@@ -117,7 +121,7 @@ namespace VideoTools
             {
 
                 // Get the video metadata from the file
-                if (Mp4.GetVideoProperties(m_mp4Reader, out m_durationMilliseconds,
+                if (!Mp4.GetVideoProperties(m_mp4Reader, out m_durationMilliseconds,
                                            out m_frameRate, out m_width, out m_height, out m_sampleCount))
                 {
                     OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to get properties of this video file: " +
@@ -136,6 +140,16 @@ namespace VideoTools
         public long GetVideoDuration()
         {
             return m_durationMilliseconds;
+        }
+
+        public int GetNumFramesInVideo()
+        {
+            //return m_sampleCount;  // TODO: Get Brad to fix this.  Get Video properties returns wrong number of frames in video
+
+
+            GopRecord gop = m_gopList[m_gopList.Keys.Max()];
+            int num = gop.frameIndex;
+            return num;
         }
 
         public string GetCacheDirectory(string cacheName)
@@ -365,6 +379,24 @@ namespace VideoTools
             return gopIndex;
         }
 
+        public bool FindNearestGop(double timestamp, out KeyValuePair<double, int> item)
+        {
+            bool success = false;
+
+            item = new KeyValuePair<double, int>(0,0);
+
+            foreach (KeyValuePair<double, int> gop in m_gopIndexLookup)
+            {
+                if(timestamp >= gop.Key)
+                {
+                    success = true;
+                    item = gop;
+                }
+            }
+
+            return success;
+        }
+
 
         public bool GetGopList(string mp4Filename, SortedList<int,GopRecord> gopList)
         {
@@ -373,6 +405,7 @@ namespace VideoTools
             if (gopList == null) gopList = m_gopList;
 
             gopList.Clear();
+            m_gopIndexLookup.Clear();
 
             if (m_mp4Reader != IntPtr.Zero)
             {
@@ -387,6 +420,7 @@ namespace VideoTools
                 for (int i = 0; i < timestamps.Length; i++)
                 {
                     gopList.Add(i, new GopRecord(ndx, timestamps[i], framesInGop[i]));
+                    m_gopIndexLookup.Add(timestamps[i], ndx);
                     ndx += framesInGop[i];
                 }
             }
@@ -543,8 +577,9 @@ namespace VideoTools
                 {                    
                     if (ReadFile(frame.filename, out timestamp, out width, out height, out depth, out frameData))
                     {
+
                         OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.FRAME, "",
-                            new FramePackage(0, timestamp, new DNNTools.ImagePackage(frameData, timestamp, width, height, depth))));
+                            new FramePackage(0, timestamp, 0, 0.0, new DNNTools.ImagePackage(frameData, timestamp, width, height, depth))));
                     }
                     else
                     {
@@ -578,8 +613,10 @@ namespace VideoTools
                     success = ReadFile(frame.filename, out timestamp, out width, out height, out depth, out frameData);
                     if (success)
                     {
+                        GopRecord gop = m_gopList[l_currentGOP];
+
                         OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.FRAME, "",
-                            new FramePackage(frameIndex, timestamp, new DNNTools.ImagePackage(frameData, timestamp, width, height, depth))));
+                            new FramePackage(frameIndex, timestamp, l_currentGOP, gop.timestamp, new DNNTools.ImagePackage(frameData, timestamp, width, height, depth))));
                     }
                     else
                     {
@@ -605,8 +642,10 @@ namespace VideoTools
                                 {
                                     l_currentGOP = gopToLoad;
 
+                                    GopRecord gop = m_gopList[l_currentGOP];
+
                                     OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.FRAME, "",
-                                        new FramePackage(frameIndex, timestamp, new DNNTools.ImagePackage(frameData, timestamp, width, height, depth))));
+                                        new FramePackage(frameIndex, timestamp, l_currentGOP, gop.timestamp, new DNNTools.ImagePackage(frameData, timestamp, width, height, depth))));
                                 }
                                 else
                                 {
@@ -641,6 +680,10 @@ namespace VideoTools
                             OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.ERROR, "Failed to Load GOP " + gopToLoad.ToString(), null));
                         }
                     }
+                    else
+                    {
+                        OnVideoCacheEvent(new VideoCache_EventArgs(VideoCache_Status_Type.REACHED_END_OF_FILE, "Reached EOF", null));
+                    }
         
                 }
 
@@ -663,15 +706,19 @@ namespace VideoTools
     public enum VideoCache_Status_Type
     {
         FRAME,
-        ERROR
+        ERROR,
+        REACHED_END_OF_FILE,
+        REACHED_BEGINNING_OF_FILE
     }
 
     public class FramePackage
     {
         public int frameIndex;
         public double timestamp;
+        public int gopIndex;
+        public double gopTimestamp;
         public DNNTools.ImagePackage imagePackage;
-        public FramePackage(int FrameIndex, double TimeStamp, DNNTools.ImagePackage ImgPackage)
+        public FramePackage(int FrameIndex, double TimeStamp, int gopIndex, double gopTimestamp, DNNTools.ImagePackage ImgPackage)
         {
             frameIndex = FrameIndex;
             timestamp = TimeStamp;

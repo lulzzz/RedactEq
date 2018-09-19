@@ -79,9 +79,8 @@
                                         <RepeatButton x:Name="HorizontalTrackLargeChangeDecreaseRepeatButton" Template="{StaticResource RepeatButtonControlTemplate}" />
                                     </Track.DecreaseRepeatButton>
                                     <Track.Thumb>
-                                        <Thumb x:Name="HorizontalThumb" Height="18" IsTabStop="True" Width="4" Style="{StaticResource ThumbStyle}" 
-                                               DragCompleted="HorizontalThumb_DragCompleted"
-                                               Background="Red" BorderBrush="#00000000" Margin="1" />                                       
+                                        <Thumb x:Name="HorizontalThumb" Height="18" IsTabStop="True" Width="4" Style="{StaticResource ThumbStyle}" Background="Red" BorderBrush="#00000000" Margin="1" />
+                                        
                                     </Track.Thumb>
                                 </Track>
                             </Grid>
@@ -90,27 +89,174 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+
+        <Style x:Key="CustomThumbForSlider" TargetType="{x:Type Thumb}">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Thumb}">
+                        <Grid>
+                            <Ellipse Fill="LightBlue" Stroke="#FF000000" Height="15" Width="15"/>
+                            <Ellipse Height="12" Width="12">
+                                <Ellipse.Fill>
+                                    <ImageBrush ImageSource="Images/up_arrow.png" Stretch="Fill"></ImageBrush>
+                                </Ellipse.Fill>
+                            </Ellipse>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MySliderStyle" TargetType="Slider">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid x:Name="Root">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="20"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Background="#FFF0F0F0">
+                                <TickBar x:Name="MyTickBar" Placement="Top" Fill="Blue"/>
+                                <TickBar x:Name="MyTickBar1" Placement="Bottom" Fill="Red"/>
+                            </Grid>
+                            <Grid Grid.Row="1" x:Name="HorizontalTemplate">
+                                <Track x:Name="PART_Track">
+                                    <Track.IncreaseRepeatButton>
+                                        <RepeatButton x:Name="HorizontalTrackLargeChangeIncreaseRepeatButton" Template="{StaticResource RepeatButtonControlTemplate}" />
+                                    </Track.IncreaseRepeatButton>
+                                    <Track.DecreaseRepeatButton>
+                                        <RepeatButton x:Name="HorizontalTrackLargeChangeDecreaseRepeatButton" Template="{StaticResource RepeatButtonControlTemplate}" />
+                                    </Track.DecreaseRepeatButton>
+                                    <Track.Thumb>
+                                        <Thumb>
+                                            <Thumb.Style>
+                                            <Style  TargetType="{x:Type Thumb}">
+                                                <Setter Property="OverridesDefaultStyle" Value="True"/>
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="{x:Type Thumb}">
+                                                            <Grid>
+                                                                <Ellipse Fill="LightBlue" Stroke="#FF000000" Height="16" Width="16"/>
+                                                                <Ellipse Height="12" Width="12">
+                                                                    <Ellipse.Fill>
+                                                                        <ImageBrush ImageSource="Images/up_arrow.png" Stretch="Fill"></ImageBrush>
+                                                                    </Ellipse.Fill>
+                                                                </Ellipse>
+                                                            </Grid>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                            </Thumb.Style>
+                                        </Thumb>                              
+                                    </Track.Thumb>
+                                </Track>
+                            </Grid>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+
     </UserControl.Resources>
 
-    <Grid x:Name="LayoutRoot" Background="LightGray" MouseMove="LayoutRoot_MouseMove" MouseLeave="LayoutRoot_MouseLeave">
-        <Border x:Name="progressBorder" Background="Blue" BorderThickness="1,5" 
-                MouseLeftButtonDown="progressBorder_MouseLeftButtonDown"
-                MouseLeftButtonUp="progressBorder_MouseLeftButtonUp"
-                MouseMove="progressBorder_MouseMove" />
-        <Slider x:Name="LowerSlider" ValueChanged="LowerSlider_ValueChanged"
+    <Grid x:Name="LayoutRoot" Background="Transparent">
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="24"/>
+        </Grid.RowDefinitions>
+    
+        <Border Grid.Row="0" x:Name="progressBorder" Background="Transparent" BorderThickness="1,5" 
+               />
+ 
+
+
+        <Slider Grid.Row="0" x:Name="CurrentSlider"    
                 Minimum="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=Minimum, Mode=TwoWay}"
                 Maximum="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=Maximum, Mode=TwoWay}"
-                Value="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=LowerValue, Mode=TwoWay}"
-                Style="{StaticResource SliderStyle}" />
-        <Slider x:Name="UpperSlider" ValueChanged="UpperSlider_ValueChanged"
-                Minimum="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=Minimum, Mode=TwoWay}"
-                Maximum="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=Maximum, Mode=TwoWay}"
-                Value="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=UpperValue, Mode=TwoWay}"
-                Style="{StaticResource SliderStyle}" />
-        <Slider x:Name="CurrentSlider" ValueChanged="CurrentSlider_ValueChanged"
-                Minimum="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=Minimum, Mode=TwoWay}"
-                Maximum="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=Maximum, Mode=TwoWay}"
-                Value="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=CurrentValue, Mode=TwoWay}"
-                Style="{StaticResource CurrentSliderStyle}" />
+                Value="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=CurrentValue, Mode=TwoWay}"               
+               >
+            <Slider.Style>
+                <Style TargetType="Slider">
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="Slider">
+                                <Grid x:Name="Root">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="8"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0" Background="Transparent">
+                                        <TickBar x:Name="MyMarkerBar" Placement="Bottom" Fill="Red" 
+                                                 Ticks="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=MarkerPositions, Mode=TwoWay}"
+                                                 />
+                                    </Grid>
+                                    <Grid Grid.Row="0" Background="Transparent">                                        
+                                        <TickBar x:Name="MyTickBar" Placement="Top" Fill="Black"
+                                                 Ticks="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=TickPositions, Mode=TwoWay}"
+                                                 />
+                                    </Grid>
+                                    
+
+                                    <Grid Grid.Row="1" x:Name="HorizontalTemplate">
+                                        <ProgressBar Margin="6,0,6,0" Height="4" VerticalAlignment="Center"
+                                             Minimum="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=Minimum, Mode=TwoWay}"
+                                            Maximum="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=Maximum, Mode=TwoWay}"
+                                            Value="{Binding RelativeSource={RelativeSource AncestorType=videotools:VideoNavigator}, Path=CurrentValue, Mode=TwoWay}"
+                                            />
+                                        <Track x:Name="PART_Track"  Height="12" VerticalAlignment="Center">
+                                            <Track.IncreaseRepeatButton>
+                                                <RepeatButton x:Name="HorizontalTrackLargeChangeIncreaseRepeatButton" Template="{StaticResource RepeatButtonControlTemplate}" />
+                                            </Track.IncreaseRepeatButton>
+                                            <Track.DecreaseRepeatButton>
+                                                <RepeatButton x:Name="HorizontalTrackLargeChangeDecreaseRepeatButton" Template="{StaticResource RepeatButtonControlTemplate}" />
+                                            </Track.DecreaseRepeatButton>
+                                            <Track.Thumb>
+                                                <Thumb DragStarted="Thumb_DragStarted" DragCompleted="Thumb_DragCompleted">
+                                                    <Thumb.Style>
+                                                        <Style  TargetType="{x:Type Thumb}">
+                                                            <Setter Property="OverridesDefaultStyle" Value="True"/>
+                                                            <Setter Property="Template">
+                                                                <Setter.Value>
+                                                                    <ControlTemplate TargetType="{x:Type Thumb}">
+                                                                        <Grid>
+                                                                            <StackPanel Orientation="Vertical">                                                                                
+                                                                                <Path Data="M 0 0 L 4 8 L -4 8 Z"  Stroke="YellowGreen"
+                                                                                      Margin="6,0,0,0" StrokeThickness="2" Fill="YellowGreen">                                                                                    
+                                                                                </Path>
+                                                                            </StackPanel>
+
+
+                                                                            <!--<Ellipse Fill="LightBlue" Stroke="#FF000000" Height="16" Width="16"/>
+                                                                            <Ellipse Height="12" Width="12">
+                                                                                <Ellipse.Fill>
+                                                                                    <ImageBrush ImageSource="Images/up_arrow.png" Stretch="Fill"></ImageBrush>
+                                                                                </Ellipse.Fill>
+                                                                            </Ellipse>-->
+                                                                            
+                                                                        </Grid>
+                                                                    </ControlTemplate>
+                                                                </Setter.Value>
+                                                            </Setter>
+                                                        </Style>
+                                                    </Thumb.Style>
+                                                </Thumb>
+                                            </Track.Thumb>
+                                        </Track>
+                                    </Grid>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+
+            </Slider.Style>           
+            
+            
+        </Slider>
     </Grid>
 </UserControl>

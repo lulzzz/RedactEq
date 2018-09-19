@@ -93,7 +93,7 @@ __global__ void redact_areas(uchar3* imageIn, uchar3* imageOut, int width, int h
 }
 
 
-void CudaTools::RedactAreas(uchar3* rgb_image_in, uchar3* rgb_image_out, int width, int height, int4* rects, int num_rects, int block_size)
+uchar3* CudaTools::RedactAreas(uchar3* bgr_image_in, int width, int height, int4* rects, int num_rects, int block_size)
 {
 	dim3 block, grid;
 	block.x = 32; block.y = 16; block.z = 1;
@@ -102,6 +102,29 @@ void CudaTools::RedactAreas(uchar3* rgb_image_in, uchar3* rgb_image_out, int wid
 	grid.y = (height + block.y - 1) / block.y;
 	grid.z = 1;
 
-	redact_areas << <grid, block >> > (rgb_image_in, rgb_image_out, width, height, rects, num_rects, block_size);
+	// allocate memory on GPU
+	uchar3* d_bgr_in;
+	uchar3* d_bgr_out;
+	int4* d_rects;	
+	cudaMalloc(&d_bgr_in, width * height * 3);
+	cudaMalloc(&d_bgr_out, width * height * 3);
+	cudaMalloc(&d_rects, num_rects * sizeof(int4));
+
+	// copy source image and rects to GPU
+	cudaMemcpy(d_bgr_in, (void*)bgr_image_in, width*height * 3, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_rects, (void*)rects, num_rects * sizeof(int4), cudaMemcpyHostToDevice);
+
+	redact_areas << <grid, block >> > (d_bgr_in, d_bgr_out, width, height, d_rects, num_rects, block_size);
+
+	// unload results from GPU to CPU
+	uchar3* h_bgr_out = (uchar3*)malloc(width*height * 3);
+	cudaMemcpy(h_bgr_out, d_bgr_out, width*height * 3, cudaMemcpyDeviceToHost);
+
+	// free memory allocated on GPU
+	cudaFree(d_bgr_in);
+	cudaFree(d_bgr_out);	
+	cudaFree(d_rects);
+
+	return h_bgr_out;
 }
 
