@@ -1,0 +1,32 @@
+﻿<Window x:Class="RedactEQ.ExportingDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:RedactEQ"
+        mc:Ignorable="d"
+        WindowStartupLocation="CenterOwner"
+        Title="Exporting Redacted Video ..." Height="140" Width="300">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ProgressBar x:Name="MyProgressBar" Grid.Row="0" Height="16" HorizontalAlignment="Stretch" Margin="10" Minimum="0.0" Maximum="100.0"/>
+
+        <TextBlock x:Name="FrameNumberTextBlock" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+
+        <Image x:Name="FinishedImage" Grid.Row="2" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,40,0"
+               Width="24" Height="24" Source="/Images/green_check.png" Visibility="Collapsed"
+               />
+
+        <Button Grid.Row="2" x:Name="CancelPB" Width="80" Height="24" Content="Cancel" 
+                Click="CancelPB_Click"
+                HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10"/>
+
+
+    </Grid>
+</Window>

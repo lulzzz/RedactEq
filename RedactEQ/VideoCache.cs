@@ -718,10 +718,12 @@ namespace VideoTools
         public int gopIndex;
         public double gopTimestamp;
         public DNNTools.ImagePackage imagePackage;
-        public FramePackage(int FrameIndex, double TimeStamp, int gopIndex, double gopTimestamp, DNNTools.ImagePackage ImgPackage)
+        public FramePackage(int FrameIndex, double TimeStamp, int GopIndex, double GopTimestamp, DNNTools.ImagePackage ImgPackage)
         {
             frameIndex = FrameIndex;
             timestamp = TimeStamp;
+            gopIndex = GopIndex;
+            gopTimestamp = GopTimestamp;
             imagePackage = ImgPackage;
         }
     }

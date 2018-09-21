@@ -20,7 +20,7 @@
     <Grid x:Name="MainGrid" >
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="100"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -69,30 +69,36 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
 
 
-            <GroupBox Grid.Column="0" x:Name="Detect_GroupBox" Width="200" Height="90" Header="Detector" 
+            <GroupBox Grid.Column="0" x:Name="Detect_GroupBox" Width="200" Height="70" Header="Detector" 
                       HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Button Grid.Column="0" x:Name="Detect_CurrentImage_PB" Width="60" Height="32" 
+                    <Button Grid.Column="0" x:Name="Detect_CurrentImage_PB" Width="40" Height="32" 
                             IsEnabled="{Binding detector_detectPB_isEnabled}"
                             Content="Detect" Margin="4" Click="Detect_CurrentImage_PB_Click"/>
-                    <Button Grid.Column="1" x:Name="Detect_Run_PB" Width="60" Height="32" 
+                    <Button Grid.Column="1" x:Name="Detect_Run_PB" Width="40" Height="32" 
                             IsEnabled="{Binding detector_runPB_isEnabled}"
                             Content="Run" Margin="4" Click="Detect_Run_PB_Click"/>
-                </Grid>
+                    <Button Grid.Column="2" x:Name="Detect_Pause_PB" Width="40" Height="32" 
+                            IsEnabled="{Binding detector_pausePB_isEnabled}"
+                            Content="Pause" Margin="4" Click="Detect_Pause_PB_Click"/>
+                    </Grid>
             </GroupBox>
 
-            <GroupBox Grid.Column="1" x:Name="Track_GroupBox" Width="200" Height="90" Header="Track"
+            <GroupBox Grid.Column="1" x:Name="Track_GroupBox" Width="200" Height="70" Header="Track"
                       HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
@@ -127,40 +133,59 @@
                         </ToggleButton.Style>
 
                     </ToggleButton>
-                    <Button Grid.Column="1" x:Name="Track_ForwardOneImage_PB" Width="60" Height="32"
+                    <Button Grid.Column="1" x:Name="Track_ForwardOneImage_PB" Width="40" Height="32"
                             IsEnabled="{Binding track_stepPB_isEnabled}"
                             Content="Step" Margin="4" Click="Track_ForwardOneImage_PB_Click">
                     </Button>
-                    <Button Grid.Column="2" x:Name="Track_Run_PB" Width="60" Height="32" 
+                    <Button Grid.Column="2" x:Name="Track_Run_PB" Width="40" Height="32" 
                             IsEnabled="{Binding track_runPB_isEnabled}"
                             Content="Run" Margin="4" Click="Track_Run_PB_Click">
                     </Button>
-                </Grid>
+                    <Button Grid.Column="3" x:Name="Track_Stop_PB" Width="40" Height="32" 
+                        IsEnabled="{Binding track_stopPB_isEnabled}"
+                        Content="Stop" Margin="4" Click="Track_Stop_PB_Click">
+                    </Button>
+                    </Grid>
             </GroupBox>
 
-            <GroupBox Grid.Column="2" x:Name="Player_GroupBox" Width="200" Height="90" Header="Player"
+            <GroupBox Grid.Column="2" x:Name="Player_GroupBox" Width="200" Height="70" Header="Player"
                       HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Button Grid.Column="0" x:Name="Player_Play_PB" Width="60" Height="32" 
+                        <Button Grid.Column="0" x:Name="Player_Play_PB" Width="40" Height="32" 
                             IsEnabled="{Binding player_playPB_isEnabled}"
                             Content="Play" Margin="4" Click="Player_Play_PB_Click"/>
-                    <GroupBox Grid.Column="1" x:Name="Player_Mode_GroupBox" Header="Mode" Height="70"
-                              IsEnabled="{Binding player_mode_GroupBox_isEnabled}"
-                              Margin="10,0,0,0">
-                        <StackPanel Orientation="Vertical">
-                            <RadioButton x:Name="Player_Mode_Original" Content="Original" Checked="Player_Mode_Original_Checked" IsChecked="True"/>
-                            <RadioButton x:Name="Player_Mode_Edited" Content="Edited" Checked="Player_Mode_Edited_Checked"/>
-                            <RadioButton x:Name="Player_Mode_Redacted" Content="Redacted" Checked="Player_Mode_Redacted_Checked"/>
-                        </StackPanel>
-                    </GroupBox>
+                        <Button Grid.Column="1" x:Name="Player_Pause_PB" Width="40" Height="32" 
+                            IsEnabled="{Binding player_pausePB_isEnabled}"
+                            Content="Pause" Margin="4" Click="Player_Pause_PB_Click"/>
                 </Grid>
             </GroupBox>
 
-        </Grid>
+                <GroupBox Grid.Column="3" x:Name="DisplayMode_GroupBox" Width="200" Height="70" Header="Display Mode"
+                        IsEnabled="{Binding display_mode_GroupBox_isEnabled}">
+                    <StackPanel Orientation="Vertical" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <StackPanel.Resources>
+                            <wpftools:EnumToBooleanConverter x:Key="EnumToBooleanConverter" />
+                        </StackPanel.Resources>
+                        <RadioButton x:Name="Display_Mode_Original" Content="Original" Checked="Display_Mode_Original_Checked" 
+                            IsChecked = "{Binding Path=displayMode, 
+                            Converter={StaticResource EnumToBooleanConverter}, 
+                            ConverterParameter={x:Static local:DisplayMode.ORIGINAL}}"/>
+                        <RadioButton x:Name="Display_Mode_Boxes" Content="Boxes" Checked="Display_Mode_Boxes_Checked"
+                            IsChecked = "{Binding Path=displayMode, 
+                            Converter={StaticResource EnumToBooleanConverter}, 
+                            ConverterParameter={x:Static local:DisplayMode.BOXES}}"/>
+                        <RadioButton x:Name="Display_Mode_Redacted" Content="Redacted" Checked="Display_Mode_Redacted_Checked"
+                            IsChecked = "{Binding Path=displayMode, 
+                            Converter={StaticResource EnumToBooleanConverter}, 
+                            ConverterParameter={x:Static local:DisplayMode.REDACTED}}"/>
+                    </StackPanel>
+                </GroupBox>
+
+            </Grid>
 
         <Grid Grid.Row="2" x:Name="Row_2_Display_Grid">
             <Grid.ColumnDefinitions>
@@ -251,21 +276,21 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Button Grid.Column="0" x:Name="Nav_Goto_Start_PB" Width="24" Height="24" Margin="8,0,8,0"
+                    <Button Grid.Column="0" x:Name="Nav_Goto_Start_PB" Width="24" Height="24" Margin="8,0,8,0" Visibility="Collapsed"
                             IsEnabled="{Binding nav_goto_startPB_isEnabled}"
                             Click="Nav_Goto_Start_PB_Click">
                         <Button.Content>
                             <Image Source="/Images/goto_start.png"/>
                         </Button.Content>
                     </Button>
-                    <Button Grid.Column="1" x:Name="Nav_Pause_PB" Width="24" Height="24"  Margin="8,0,8,0"
+                        <Button Grid.Column="1" x:Name="Nav_Pause_PB" Width="24" Height="24"  Margin="8,0,8,0" Visibility="Collapsed"
                             IsEnabled="{Binding nav_pausePB_isEnabled}"
                             Click="Nav_Pause_PB_Click">
                         <Button.Content>
                             <Image Source="/Images/pause.png"/>
                         </Button.Content>
                     </Button>
-                    <Button Grid.Column="2" x:Name="Nav_Goto_End_PB" Width="24" Height="24"  Margin="8,0,8,0"
+                        <Button Grid.Column="2" x:Name="Nav_Goto_End_PB" Width="24" Height="24"  Margin="8,0,8,0" Visibility="Collapsed"
                             IsEnabled="{Binding nav_goto_endPB_isEnabled}"
                             Click="Nav_Goto_End_PB_Click">
                         <Button.Content>

@@ -41,168 +41,24 @@ namespace VideoTools
 
 
 
-        // Call this function to read/decode an MP4 file.
-        // the handler parameter is simply a function defined elsewhere as:
-        //      void NewFrame(ProgressStruct progress)  // this function gets called once per frame decoded
-        //      {   
-        //          <put whatever you want here to...like displaying the frames, feeding them to a dnn, or whatever>
-        //      }
-        //  
+
         public async void StartPlayback(string filename, Action<ProgressStruct> newFrameHandler,
-            int decodeWidth, int decodeHeight, 
-            CancellationTokenSource tokenSource, 
+            int decodeWidth, int decodeHeight, double startTimestamp, double endTimestamp, DNNTools.DNNengine dnnEngine, float confidence, bool useTracker,
+            CancellationTokenSource tokenSource,
             WPFTools.PauseTokenSource pauseTokenSource,
-            bool paceOutput)
-        {
-            //construct Progress<T>, passing ReportProgress as the Action<T> 
-            var progressIndicator = new Progress<ProgressStruct>(newFrameHandler);
-
-            //call async method
-            long position = await PlayMp4FileAsync(filename, decodeWidth, decodeHeight,
-                progressIndicator, tokenSource.Token, pauseTokenSource.Token, paceOutput);
-        }
-
-
-
-        async Task<long> PlayMp4FileAsync(string path, int targetWidth, int targetHeight,
-            IProgress<ProgressStruct> progress, 
-            CancellationToken token, WPFTools.PauseToken pauseToken,
-            bool paceOutput)
-        {
-            // path - filename/path to Mp4 file
-            // startingAt - point in time to start decoding/playback, given in milliseconds
-            // targetWidth, targetHeight - desired pixel dimension of decoded frames
-            // paceOutput - flag indicating whether to pace the output, using frame 
-            //              timestamps and framerate, so that playback is at video rate
-
-            long count = -1;
-
-            if (File.Exists(path))
-            {
-                count = await Task.Run<long>(async () =>
+            bool paceOutput, Dictionary<double, int> frameIndexLookup)
                 {
-                    double timestamp = 0.0f;
-                    Stopwatch sw = new Stopwatch();
+                    //construct Progress<T>, passing ReportProgress as the Action<T> 
+                    var progressIndicator = new Progress<ProgressStruct>(newFrameHandler);
 
-                    IntPtr mp4Reader = Mp4.CreateMp4Reader(path);
-
-                    if (mp4Reader != IntPtr.Zero)
-                    {
-                        try
-                        {
-                            long durationMilliseconds;
-                            double frameRate;
-                            long timestampDelta;
-                            long timestampWindow;
-                            int height;
-                            int width;
-                            int sampleCount;
-
-                            // Get the video metadata from the file
-                            if (Mp4.GetVideoProperties(mp4Reader, out durationMilliseconds, out frameRate, out width, out height, out sampleCount))
-                            {
-                                timestampDelta = (long)(1000.0f / frameRate);
-                                timestampWindow = timestampDelta / 2;
-
-
-                                // Ask the decoder to resample to targetWidth x targetHeight, and assume 24-bit RGB colorspace
-                                byte[] frame = new byte[targetWidth * targetHeight * 3];
-                                bool key;
-                               
-                                ProgressStruct prog;
-
-                                m_frameCount = 0;
-
-                                sw.Start();
-
-                                while (true)
-                                {
-                                    timestamp = (double)Mp4.GetNextVideoFrame(mp4Reader, frame, out key, targetWidth, targetHeight)/1000.0;
-
-                                    if (timestamp == -1)   // EOF                             
-                                    {
-                                        break;
-                                    }
-
-                                    if (token.IsCancellationRequested)
-                                    {
-                                        // pause or stop requested
-                                        break;
-                                    }
-
-                                    byte[] frameCopy = new byte[targetWidth * targetHeight * 3];
-                                    Buffer.BlockCopy(frame, 0, frameCopy, 0, targetWidth * targetHeight * 3);
-                                    prog = new ProgressStruct(timestamp, durationMilliseconds, frameCopy, m_frameCount, key, false, targetWidth, targetHeight);
-
-                                    if (progress != null && prog.data != null)
-                                    {
-                                        // if we're in playback mode, pace the frames appropriately
-                                        if (paceOutput)
-                                        {
-                                            while (sw.ElapsedMilliseconds < timestampDelta)
-                                            {
-                                                Thread.Sleep(1);
-                                            }
-                                            sw.Restart();
-                                        }
-
-                                        m_frameCount++;
-
-                                        // send frame to UI thread
-                                        progress.Report(prog);
-                                    }
-
-                                    await pauseToken.WaitWhilePausedAsync();
-                                }
-                            }
-
-                        }
-                        catch (Exception ex)
-                        {
-                            m_errorMsg = ex.Message;
-                            timestamp = -2;  // indicating an exception occurred
-                        }
-                        finally
-                        {
-                            Mp4.DestroyMp4Reader(mp4Reader);
-                            progress.Report(new ProgressStruct(-1,0,null,0,false,true,0,0)); // signal that the player stopped (timestamp = -1)
-                        }
-                    }
-                    else
-                    {
-                        timestamp = -3;
-                        m_errorMsg = "Could not open file.";
-                    }
-
-                    return (long)timestamp;
-
-                }, token);
-
-            } // END File.Exists
-
-            return count;
-        }
+                    //call async method
+                    long position = await PlayMp4FileAsync(filename, decodeWidth, decodeHeight, startTimestamp, endTimestamp, dnnEngine, confidence, useTracker,
+                        progressIndicator, tokenSource.Token, pauseTokenSource.Token, paceOutput, frameIndexLookup);
+                }
 
 
 
-
-        public async void StartPlayback_1(string filename, Action<ProgressStruct> newFrameHandler,
-    int decodeWidth, int decodeHeight, double startTimestamp, double endTimestamp, DNNTools.DNNengine dnnEngine, float confidence, bool useTracker,
-    CancellationTokenSource tokenSource,
-    WPFTools.PauseTokenSource pauseTokenSource,
-    bool paceOutput, Dictionary<double, int> frameIndexLookup)
-        {
-            //construct Progress<T>, passing ReportProgress as the Action<T> 
-            var progressIndicator = new Progress<ProgressStruct>(newFrameHandler);
-
-            //call async method
-            long position = await PlayMp4FileAsync_1(filename, decodeWidth, decodeHeight, startTimestamp, endTimestamp, dnnEngine, confidence, useTracker,
-                progressIndicator, tokenSource.Token, pauseTokenSource.Token, paceOutput, frameIndexLookup);
-        }
-
-
-
-        async Task<long> PlayMp4FileAsync_1(string path, int targetWidth, int targetHeight, double startTimestamp, double endTimestamp, 
+        async Task<long> PlayMp4FileAsync(string path, int targetWidth, int targetHeight, double startTimestamp, double endTimestamp, 
             DNNTools.DNNengine dnnEngine, float confidence, bool useTracker,
             IProgress<ProgressStruct> progress,
             CancellationToken token, WPFTools.PauseToken pauseToken,
@@ -270,7 +126,16 @@ namespace VideoTools
                                 // move to starting position
                                 double actualStart = Mp4.SetTimePositionAbsolute(mp4Reader, startTimestamp);
 
-                               
+                                int frameIndex = 0;
+
+                                // get the starting frame index
+                                int tempIndex = 0;
+                                if (frameIndexLookup != null)
+                                    if (frameIndexLookup.TryGetValue(actualStart, out tempIndex))
+                                    {
+                                        frameIndex = tempIndex;
+                                    }
+
 
                                 // create flag used to quit early
                                 bool running = true;
@@ -281,15 +146,13 @@ namespace VideoTools
                                     running = false;
                                 }
 
-
                                 sw.Start();
-
-                                int frameIndex = 0;
+                                
 
                                 while (running)
                                 {
                                     timestamp = (double)Mp4.GetNextVideoFrame(mp4Reader, frame, out key, targetWidth, targetHeight) / 1000.0;
-
+                                    
                                     if (timestamp == -0.001)   // EOF                             
                                     {
                                         running = false;
@@ -303,20 +166,6 @@ namespace VideoTools
                                         break;
                                     }
                                     
-                                    if(key)
-                                    {
-                                        // get frame index for this key frame
-                                        int tempIndex = 0;
-                                        if(frameIndexLookup.TryGetValue(timestamp,out tempIndex))
-                                        {
-                                            frameIndex = tempIndex;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        frameIndex++;
-                                    }
-
 
                                     byte[] frameCopy = new byte[targetWidth * targetHeight * 3];
                                     Buffer.BlockCopy(frame, 0, frameCopy, 0, targetWidth * targetHeight * 3);
@@ -367,6 +216,8 @@ namespace VideoTools
                                     {
                                         break;
                                     }
+
+                                    frameIndex++;
                                 }
                             }
 
@@ -403,9 +254,6 @@ namespace VideoTools
 
             return count;
         }
-
-
-
 
 
 

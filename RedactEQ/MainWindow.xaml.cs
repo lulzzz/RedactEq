@@ -62,7 +62,7 @@ namespace RedactEQ
 
         ITargetBlock<Tuple<int>> m_cachePipeline;
 
-        bool m_tracking = false;
+        //bool m_tracking = false;
         Int32Rect m_startingTrackingRect;
         CVTracker m_tracker;
 
@@ -93,6 +93,16 @@ namespace RedactEQ
             m_cudaTools = new CudaTools();
             m_cudaTools.Init();
             m_dnnLoaded = false;
+
+
+            bool success = InitDNN("D:/tensorflow/pretrained_models/Golden/1/frozen_inference_graph.pb",
+                   "D:/tensorflow/pretrained_models/Golden/1/face_label_map.pbtxt");
+
+            if(!success)
+            {
+                MessageBox.Show("Failed to initialize Neural Net", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                Detect_GroupBox.Visibility = Visibility.Collapsed;
+            }
 
         }
 
@@ -155,7 +165,7 @@ namespace RedactEQ
                     m_nms = new NonMaximumSuppression();
                     m_nms.Init();
 
-                    m_pipeline = m_engine.CreateDNNPipeline(modelFile, classes, m_editsDB, m_analysisWidth, m_analysisHeight, TFDataType.UInt8, 0.50f, null,null,
+                    m_pipeline = m_engine.CreateDNNPipeline(modelFile, classes, m_editsDB, m_analysisWidth, m_analysisHeight, TFDataType.UInt8, 0.50f, null, null,
                                                             m_uiTask, m_cancelTokenSource.Token);
                 }
                 else
@@ -200,7 +210,7 @@ namespace RedactEQ
             {
                 case VideoCache_Status_Type.REACHED_END_OF_FILE:
                 case VideoCache_Status_Type.REACHED_BEGINNING_OF_FILE:
-                    m_tracking = false;
+                    //m_tracking = false;
                     m_vm.state = AppState.READY;
                     break;
                 case VideoCache_Status_Type.ERROR:
@@ -217,10 +227,37 @@ namespace RedactEQ
                             m_vm.currentFrameIndex = e.frame.frameIndex;
                             m_vm.currentGopIndex = e.frame.gopIndex;
                             m_vm.currentGopTimestamp = e.frame.gopTimestamp;
-                            
+
+                            if(m_vm.imageOverlay!= null)m_vm.imageOverlay.Clear();
+                            int size = e.frame.imagePackage.width * e.frame.imagePackage.height * 3;
+                            if (m_vm.lastImageByteArray == null) m_vm.lastImageByteArray = new byte[size];
+                            Buffer.BlockCopy(e.frame.imagePackage.data, 0, m_vm.lastImageByteArray, 0, size);
+                            //m_vm.lastImageByteArray = e.frame.imagePackage.data;
+                            m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(e.frame.timestamp);
+
+                            m_vm.timestamp = e.frame.timestamp;
+                            videoNavigator.CurrentValue = e.frame.timestamp;
+
+                            switch (m_vm.displayMode)
+                            {
+                                case DisplayMode.ORIGINAL:
+                                    break;
+                                case DisplayMode.BOXES:
+                                    RedrawRedactionBoxes();
+                                    break;
+                                case DisplayMode.REDACTED:
+                                    int w = e.frame.imagePackage.width;
+                                    int h = e.frame.imagePackage.height;
+                                    int byteCount = w * h * 3;
+                                    byte[] redactedImage = new byte[byteCount];
+                                    GetRedactedImage(m_vm.lastImageByteArray, w, h, m_vm.redactions, 16, out redactedImage);
+                                    Buffer.BlockCopy(redactedImage, 0, e.frame.imagePackage.data, 0, byteCount);
+                                    break;
+                            }
+
                             m_vm.SetImage(e.frame.imagePackage.width, e.frame.imagePackage.height, e.frame.imagePackage.numChannels, e.frame.imagePackage.data);
-                            m_vm.lastImageByteArray = e.frame.imagePackage.data;
-                            if (m_tracking)
+
+                            if (m_vm.state == AppState.TRACKER_RUNNING)
                             {
                                 UpdateTracker(e.frame.timestamp);
 
@@ -240,17 +277,6 @@ namespace RedactEQ
                                     Step_Prev();
                             }
 
-                            m_vm.timestamp = e.frame.timestamp;
-
-                            m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(e.frame.timestamp);
-                            m_vm.RedrawRedactionBoxes();
-
-                            //double durationOfEntireVideo = (double)m_videoCache.GetVideoDuration() / 1000.0;
-                            //double percentDone = e.frame.timestamp / durationOfEntireVideo * 100.0f;
-                            videoNavigator.CurrentValue = e.frame.timestamp;
-
-                            //if (videoNavigator.CurrentValue < videoNavigator.LowerValue) videoNavigator.LowerValue = videoNavigator.CurrentValue;
-                            //if (videoNavigator.CurrentValue > videoNavigator.UpperValue) videoNavigator.UpperValue = videoNavigator.CurrentValue;
 
                         }));
                     }
@@ -435,11 +461,6 @@ namespace RedactEQ
         }
 
 
-        //private void Update_Image(double timestamp, int width, int height, int depth, byte[] data)
-        //{
-        //    m_vm.SetImage(width, height, depth, data);
-        //    m_vm.timestamp = timestamp;
-        //}
 
         private void ImageOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
@@ -466,7 +487,7 @@ namespace RedactEQ
                     if (m_tracker.StartTracking(m_vm.lastImageByteArray, m_vm.width, m_vm.height,
                         m_startingTrackingRect.X, m_startingTrackingRect.Y, m_startingTrackingRect.Width, m_startingTrackingRect.Height))
                     {
-                        m_tracking = true;
+                        //m_tracking = true;
                         m_vm.messageToUser = "Ready to Track";
                         m_vm.state = AppState.READY_TO_TRACK;
 
@@ -475,28 +496,27 @@ namespace RedactEQ
                             m_editsDB.AddFrameEdit(m_vm.timestamp, FRAME_EDIT_TYPE.TRACKING_REDACTION, new VideoTools.BoundingBox(x1, y1, x2, y2));
                         }
 
-                        m_vm.RedrawRedactionBoxes();
+                        //m_vm.imageOverlay.Clear();
+                        //RedrawRedactionBoxes();
                     }
                     else
                     {
                         MessageBox.Show("Failed to Initialize Tracker", "Tracker Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                        m_tracking = false;
+                        //m_tracking = false;
                         m_vm.messageToUser = "";
                         Track_Enable_RegionPick_PB.IsChecked = false;
                     }
-                }
-
-
-                
+                }                
             }
-            else if(m_vm.state == AppState.READY)
+            else if(m_vm.state == AppState.READY && m_vm.displayMode != DisplayMode.ORIGINAL)
             {
                 if (m_editsDB != null)
                 {                    
                     m_editsDB.AddFrameEdit(m_vm.timestamp, FRAME_EDIT_TYPE.MANUAL_REDACTION, new VideoTools.BoundingBox(x1, y1, x2, y2));
                 }
 
-                m_vm.RedrawRedactionBoxes();
+                m_vm.imageOverlay.Clear();
+                RedrawRedactionBoxes();
             }
 
         }
@@ -514,16 +534,24 @@ namespace RedactEQ
 
         private void ImageOverlay_MouseMove(object sender, MouseEventArgs e)
         {
-            if (m_dragging)
+            if (m_dragging && m_vm.displayMode != DisplayMode.ORIGINAL)
             {
                 int x1, x2, y1, y2;
-
-                m_vm.RedrawRedactionBoxes();
-
-                // draw new (the one we're dragging that is not yet in the collection)
                 m_p2 = ConvertToOverlayPosition(e.GetPosition(ImageOverlay), ImageDisplay, m_vm.imageOverlay);
                 GetDrawPoints(out x1, out y1, out x2, out y2);
-                m_vm.imageOverlay.FillRectangle(x1, y1, x2, y2, m_vm.fillColor);                
+
+                m_vm.imageOverlay.Clear();
+                RedrawRedactionBoxes();
+                
+                switch (m_vm.state)
+                {
+                    case AppState.READY:
+                        DrawRedactionBox(x1, y1, x2, y2);
+                        break;
+                    case AppState.WAITING_FOR_TRACKING_REGION_SELECTION:
+                        DrawTrackingBox(x1, y1, x2, y2);
+                        break;
+                }
             }
         }
 
@@ -548,7 +576,7 @@ namespace RedactEQ
             if (deleteThisOne != null)
             {
                 m_vm.redactions.Remove(deleteThisOne);
-                m_vm.RedrawRedactionBoxes();
+                RedrawRedactionBoxes();
             }
         }
 
@@ -588,7 +616,7 @@ namespace RedactEQ
             double endTimestamp = videoNavigator.Maximum;
             m_vm.state = AppState.PLAYER_RUNNING;
             m_activeBackgroundTask = BackgroundTaskRunning.PLAYER;
-            mp4Reader.StartPlayback_1(filename, NewFrame_From_Mp4Reader, decodeWidth, decodeHeight, startTimestamp, endTimestamp, null, 0.70f, false,
+            mp4Reader.StartPlayback(filename, NewFrame_From_Mp4Reader, decodeWidth, decodeHeight, startTimestamp, endTimestamp, null, 0.70f, false,
                 m_cancelTokenSource, m_pauseTokenSource, paceOutput, m_videoCache.m_gopIndexLookup);
         }
 
@@ -608,39 +636,34 @@ namespace RedactEQ
                 int h = frame.height;
                 double timestamp = frame.timestamp;
                 int frameIndex = frame.frameIndex;
-                int byteCount = frame.width * frame.height * 3;
-            
-                m_vm.lastImageByteArray = frame.data;
-
+                int byteCount = frame.width * frame.height * 3;         
 
                 // handle new frame coming in             
                 m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(frame.timestamp);
 
-                if ((bool)Player_Mode_Redacted.IsChecked)
-                {   
-                    if(m_vm.redactions.Count > 0)
-                    {
-                        byte[] redactedImage = new byte[byteCount];
-                        GetRedactedImage(frame.data,w,h, m_vm.redactions, 16, out redactedImage);
-                        Buffer.BlockCopy(redactedImage, 0, frame.data, 0, byteCount);
-                    }
-                }
+                m_vm.imageOverlay.Clear();
+                m_vm.lastImageByteArray = frame.data;
 
+                switch (m_vm.displayMode)
+                {
+                    case DisplayMode.ORIGINAL:
+                        break;
+                    case DisplayMode.BOXES:
+                        RedrawRedactionBoxes();
+                        break;
+                    case DisplayMode.REDACTED:
+                        byte[] redactedImage = new byte[byteCount];
+                        GetRedactedImage(m_vm.lastImageByteArray, w, h, m_vm.redactions, 16, out redactedImage);
+                        Buffer.BlockCopy(redactedImage, 0, frame.data, 0, byteCount);
+                        break;
+                }
 
                 m_vm.SetImage(w,h, 3, frame.data);
 
-                //double durationOfEntireVideo = (double)m_videoCache.GetVideoDuration() / 1000.0;
-                //double percentDone = timestamp / durationOfEntireVideo * 100.0f;
                 videoNavigator.CurrentValue = frame.timestamp;
                 
                 m_vm.currentFrameIndex = frameIndex;
                 m_vm.timestamp = timestamp;
-
-                if ((bool)Player_Mode_Edited.IsChecked)
-                {                    
-                    m_vm.RedrawRedactionBoxes();
-                }
-
 
                 if (frame.key)
                 {
@@ -660,23 +683,60 @@ namespace RedactEQ
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-        private void Detect_CurrentImage_PB_Click(object sender, RoutedEventArgs e)
+        private async void Detect_CurrentImage_PB_Click(object sender, RoutedEventArgs e)
         {
             if (m_vm.state == AppState.READY)
             {
-                if (!m_dnnLoaded) LoadDNN();
+                if (!m_dnnLoaded)
+                {
+                    m_vm.isBusy = true;
+                    m_vm.messageToUser = "Initializing Neural Net ...";
 
-                if(m_dnnLoaded)
+                    await Task.Run(() =>
+                    {
+                        int w = 640;
+                        int h = 480;
+                        int d = 3;
+                        byte[] data = new byte[w * h * d];
+                        List<DNNTools.BoundingBox> boxList = m_engine.EvalImage(data, w, h, d, w, h, 0.70f);
+                    });
+
+                    m_dnnLoaded = true;
+                    m_vm.isBusy = false;
+                }
+
+                if (m_dnnLoaded)
+                {
+                    m_vm.displayMode = DisplayMode.BOXES;
                     Detect_Current_Image();
+                }
             }
         }
 
-        private void Detect_Run_PB_Click(object sender, RoutedEventArgs e)
+        private async void Detect_Run_PB_Click(object sender, RoutedEventArgs e)
         {
+            Task t1;
 
             if (m_vm.state == AppState.READY)
             {
-                if (!m_dnnLoaded) LoadDNN();
+                if (!m_dnnLoaded)
+                {                  
+                    m_vm.isBusy = true;
+                    m_vm.messageToUser = "Initializing Neural Net ...";
+
+                    await Task.Run(() =>
+                    {
+                        int w = 640;
+                        int h = 480;
+                        int d = 3;
+                        byte[] data = new byte[w * h * d];
+                        List<DNNTools.BoundingBox> boxList = m_engine.EvalImage(data, w, h, d, w, h, 0.70f);
+                    });
+
+                    m_dnnLoaded = true;                        
+                    m_vm.isBusy = false;
+                }
+
 
                 if (m_dnnLoaded)
                 {
@@ -690,6 +750,7 @@ namespace RedactEQ
                             if (m_vm.mp4Filename != null)
                                 if (File.Exists(m_vm.mp4Filename))
                                 {
+                                    m_vm.displayMode = DisplayMode.BOXES;
                                     Detection_Start(m_vm.mp4Filename, 640, 480, false);
                                 }
                             break;
@@ -699,6 +760,11 @@ namespace RedactEQ
                             m_vm.state = AppState.DETECTOR_RUNNING;
                             break;
                     }
+                }
+                else
+                {
+                    MessageBox.Show("Neural Net Failed to initialize.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    m_vm.state = AppState.READY;
                 }
 
             }
@@ -715,7 +781,7 @@ namespace RedactEQ
             double endTimestamp = videoNavigator.Maximum;
             m_vm.state = AppState.DETECTOR_RUNNING;
             m_activeBackgroundTask = BackgroundTaskRunning.DETECTOR;
-            mp4Reader.StartPlayback_1(filename, NewFrame_From_Mp4Reader_For_Detection, decodeWidth, decodeHeight, startTimestamp, endTimestamp, m_engine, 0.70f, false,
+            mp4Reader.StartPlayback(filename, NewFrame_From_Mp4Reader_For_Detection, decodeWidth, decodeHeight, startTimestamp, endTimestamp, m_engine, 0.70f, false,
                 m_cancelTokenSource, m_pauseTokenSource, paceOutput, m_videoCache.m_gopIndexLookup);
         }
 
@@ -730,50 +796,70 @@ namespace RedactEQ
                 if (!frame.finished) Nav_Goto_Start_PB_Click(null, null);
             }
             else
-            {  
-                // handle new frame coming in
-                BitmapSource bs = BitmapSource.Create(frame.width, frame.height, 96, 96,
-                                PixelFormats.Bgr24, null, frame.data, frame.width * 3);
+            {
+                int w = frame.width;
+                int h = frame.height;
+                double timestamp = frame.timestamp;
+                int frameIndex = frame.frameIndex;
+                int byteCount = frame.width * frame.height * 3;
+                m_vm.lastImageByteArray = frame.data;
 
-                m_vm.imageDisplay = new WriteableBitmap(bs);
-
-                //double durationOfEntireVideo = (double)m_videoCache.GetVideoDuration() / 1000.0;
-                //double percentDone = frame.timestamp / durationOfEntireVideo * 100.0f;
-                videoNavigator.CurrentValue = frame.timestamp;
-
-                m_vm.currentFrameIndex = frame.frameIndex;
-                m_vm.timestamp = frame.timestamp;
-
-                //Detect_Current_Image();
-                if(frame.boxList.Count > 0)
+                if (frame.boxList != null)
                 {
-                    int w = frame.width;
-                    int h = frame.height;
+                    if (frame.boxList.Count > 0)
+                    {
+                        // clean up duplicates
+                        if (m_nms == null)
+                        {
+                            m_nms = new NonMaximumSuppression();
+                            m_nms.Init();
+                        }
+                        frame.boxList = m_nms.Execute(frame.boxList, 0.50f);
 
-                    // clean up duplicates
-                    frame.boxList = m_nms.Execute(frame.boxList, 0.50f);
+                        // make sure we don't have duplicates with what is already in edits database
+                        List<DNNTools.BoundingBox> boxList_inEditsDB = m_editsDB.GetBoundingBoxesForTimestamp(timestamp, w, h);
+                        boxList_inEditsDB = m_nms.Execute(frame.boxList, boxList_inEditsDB, 0.50f);
 
-                    // make sure we don't have duplicates with what is already in edits database
-                    List<DNNTools.BoundingBox> boxList_inEditsDB = m_editsDB.GetBoundingBoxesForTimestamp(m_vm.timestamp, w, h);
-                    boxList_inEditsDB = m_nms.Execute(frame.boxList, boxList_inEditsDB, 0.50f);
-
-                    // update edits database
-                    m_editsDB.UpdateRedactions(m_vm.timestamp, boxList_inEditsDB, w, h);
+                        // update edits database
+                        m_editsDB.UpdateRedactions(timestamp, boxList_inEditsDB, w, h);
+                    }
+                }
 
                     Application.Current.Dispatcher.Invoke(new Action(() =>
-                    {
+                    {   
+                        videoNavigator.CurrentValue = timestamp;
+                        m_vm.currentFrameIndex = frameIndex;
+                        m_vm.timestamp = timestamp;
+                        m_vm.imageOverlay.Clear();
+
                         // update viewmodel on ui thread
-                        m_vm.redactions = m_editsDB.GetEditsForFrame(m_vm.timestamp);
-                        m_vm.RedrawRedactionBoxes();
+                        m_vm.redactions = m_editsDB.GetEditsForFrame(timestamp);
 
                         if (frame.key)
                         {
-                            m_vm.currentGopTimestamp = frame.timestamp;
-                            m_vm.currentGopIndex = m_videoCache.GetGopIndexContainingFrameIndex(frame.frameIndex, m_videoCache.m_gopList);
+                            m_vm.currentGopTimestamp = timestamp;
+                            m_vm.currentGopIndex = m_videoCache.GetGopIndexContainingFrameIndex(frameIndex, m_videoCache.m_gopList);
                         }
 
+                        switch (m_vm.displayMode)
+                        {
+                            case DisplayMode.ORIGINAL:
+                                break;
+                            case DisplayMode.BOXES:
+                                RedrawRedactionBoxes();
+                                break;
+                            case DisplayMode.REDACTED:
+                                byte[] redactedImage = new byte[byteCount];
+                                GetRedactedImage(m_vm.lastImageByteArray, w, h, m_vm.redactions, 16, out redactedImage);
+                                Buffer.BlockCopy(redactedImage, 0, frame.data, 0, byteCount);
+                                break;
+                        }
+
+                        m_vm.SetImage(w, h, 3, frame.data);
+
+
                     }));
-                }
+                
             }
         }
 
@@ -809,7 +895,7 @@ namespace RedactEQ
                     {
                         // update viewmodel on ui thread
                         m_vm.redactions = m_editsDB.GetEditsForFrame(m_vm.timestamp);
-                        m_vm.RedrawRedactionBoxes();
+                        RedrawRedactionBoxes();
                     }));
                     
                 });
@@ -843,7 +929,7 @@ namespace RedactEQ
                     {
                         // update viewmodel on ui thread
                         m_vm.redactions = m_editsDB.GetEditsForFrame(m_vm.timestamp);
-                        m_vm.RedrawRedactionBoxes();
+                        RedrawRedactionBoxes();
                     }));
 
             }
@@ -905,14 +991,15 @@ namespace RedactEQ
         {
             m_vm.state = AppState.WAITING_FOR_TRACKING_REGION_SELECTION;
             m_vm.messageToUser = "Select Area to Track";
-            m_tracking = false;
-            m_startingTrackingRect = new Int32Rect(0, 0, 0, 0);            
+            //m_tracking = false;
+            m_startingTrackingRect = new Int32Rect(0, 0, 0, 0);
+            m_vm.displayMode = DisplayMode.BOXES;           
         }
 
         private void Track_Enable_RegionPick_PB_Unchecked(object sender, RoutedEventArgs e)
         {
             m_vm.state = AppState.READY;
-            m_tracking = false;
+            //m_tracking = false;
             m_vm.messageToUser = "";
         }
 
@@ -953,41 +1040,6 @@ namespace RedactEQ
                     m_vm.state = AppState.READY;
                     break;
             }
-        }
-
-        private async void LoadDNN()
-        {
-            m_vm.isBusy = true;
-            m_vm.messageToUser = "Initializing Neural Net ...";
-
-            bool dnnLoadSucceeded = await Task.Run(() =>
-            {
-                bool success;
-                success = InitDNN("D:/tensorflow/pretrained_models/Golden/1/frozen_inference_graph.pb",
-                    "D:/tensorflow/pretrained_models/Golden/1/face_label_map.pbtxt");
-
-                if (success)
-                {
-                    // send dummy image to DNN to force it to load                    
-                    int w = 640;
-                    int h = 480;
-                    int d = 3;
-                    byte[] data = new byte[w * h * d];
-                    List<DNNTools.BoundingBox> boxList = m_engine.EvalImage(data, w, h, d, w, h, 0.70f);
-                }
-                return success;
-            });
-
-            if (dnnLoadSucceeded)
-            {
-                m_dnnLoaded = true;
-            }
-            else
-            {
-                MessageBox.Show("Failed to Load/Initialize DNN", "DNN Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-
-            m_vm.isBusy = false;
         }
 
         private async void Menu_File_Open_Click(object sender, RoutedEventArgs e)
@@ -1073,12 +1125,45 @@ namespace RedactEQ
 
         private void Menu_File_Export_Click(object sender, RoutedEventArgs e)
         {
+            string inputFilename = m_vm.mp4Filename;
+            string outputFilename = inputFilename.Replace(".mp4", "_redacted.mp4");
+            int frameCount = m_videoCache.GetMaxFrameIndex();
+            double endTime = double.MaxValue;
 
+            string outputFilename_Only = Path.GetFileName(outputFilename);
+
+            MessageBoxResult result = MessageBox.Show("Save redacted video to: " + outputFilename_Only, 
+                "Save Redacted Video", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            
+            if(result == MessageBoxResult.Yes)
+            {
+                ExportingDialog dlg = new ExportingDialog(this, inputFilename, outputFilename, 0.0, endTime, frameCount, 640, 480, m_editsDB, m_cudaTools);
+
+                dlg.ShowDialog();
+            }
         }
 
-        private void Menu_File_LoadDNN_Click(object sender, RoutedEventArgs e)
+
+
+        private async void Menu_File_LoadDNN_Click(object sender, RoutedEventArgs e)
         {
-            LoadDNN();
+            if (!m_dnnLoaded)
+            {
+                m_vm.isBusy = true;
+                m_vm.messageToUser = "Initializing Neural Net ...";
+
+                await Task.Run(() =>
+                {
+                    int w = 640;
+                    int h = 480;
+                    int d = 3;
+                    byte[] data = new byte[w * h * d];
+                    List<DNNTools.BoundingBox> boxList = m_engine.EvalImage(data, w, h, d, w, h, 0.70f);
+                });
+
+                m_dnnLoaded = true;
+                m_vm.isBusy = false;
+            }
         }
 
 
@@ -1089,7 +1174,7 @@ namespace RedactEQ
 
         private void Display_Grid_MouseWheel(object sender, MouseWheelEventArgs e)
         {
-            if (m_vm.state == AppState.READY)
+            if (m_vm.state == AppState.READY || m_vm.state == AppState.WAITING_FOR_TRACKING_REGION_SELECTION)
             {
                 if (e.Delta > 0)
                     Step_Forw();
@@ -1104,40 +1189,46 @@ namespace RedactEQ
             if(result == MessageBoxResult.Yes)
             {
                 m_editsDB.RemoveAllEdits();
-                m_vm.RedrawRedactionBoxes();
+                RedrawRedactionBoxes();
             }            
         }
 
-        private void Player_Mode_Original_Checked(object sender, RoutedEventArgs e)
+        private void Display_Mode_Original_Checked(object sender, RoutedEventArgs e)
         {
             if(m_vm != null)
             {
-                if(m_vm.imageOverlay != null)
+                if (m_vm.imageOverlay != null)
+                {
                     m_vm.imageOverlay.Clear();
+                    m_vm.SetImage(m_vm.width, m_vm.height, 3, m_vm.lastImageByteArray);
+                }
             }
             
         }
 
-        private void Player_Mode_Edited_Checked(object sender, RoutedEventArgs e)
+        private void Display_Mode_Boxes_Checked(object sender, RoutedEventArgs e)
         {
             if (m_vm != null)
             {
                 if (m_vm.imageOverlay != null)
                 {
+                    m_vm.imageOverlay.Clear();
+                    m_vm.SetImage(m_vm.width, m_vm.height, 3, m_vm.lastImageByteArray);
                     m_vm.redactions = m_editsDB.GetRedactionListForTimestamp(m_vm.timestamp);
-                    m_vm.RedrawRedactionBoxes();                    
+                    RedrawRedactionBoxes();                    
                 }
             }           
         }
 
 
 
-        private void Player_Mode_Redacted_Checked(object sender, RoutedEventArgs e)
+        private void Display_Mode_Redacted_Checked(object sender, RoutedEventArgs e)
         {
             byte[] imageOut;
             
             if(GetRedactedImage(m_vm.lastImageByteArray, m_vm.width, m_vm.height, m_vm.redactions, 16, out imageOut ))
             {
+                m_vm.imageOverlay.Clear();
                 m_vm.SetImage(m_vm.width, m_vm.height, 3, imageOut);
             }
         }
@@ -1187,7 +1278,7 @@ namespace RedactEQ
                 m_vm.redactions.Add(new FrameEdit((FRAME_EDIT_TYPE)box.classID, new VideoTools.BoundingBox(x1,y1,x2,y2)));
             }
 
-            m_vm.RedrawRedactionBoxes();
+            RedrawRedactionBoxes();
         }
 
         private void DeleteRedactionPB_Click(object sender, RoutedEventArgs e)
@@ -1196,7 +1287,7 @@ namespace RedactEQ
             {
                 FrameEdit fe = m_vm.selectedRedaction;
                 m_vm.redactions.Remove(fe);
-                m_vm.RedrawRedactionBoxes();
+                RedrawRedactionBoxes();
             }
         }
 
@@ -1260,7 +1351,7 @@ namespace RedactEQ
             if (nmsCleanUpSucceeded)
             {
                 m_vm.redactions = m_editsDB.GetEditsForFrame(m_vm.timestamp);
-                m_vm.RedrawRedactionBoxes();
+                RedrawRedactionBoxes();
             }
             else
             {
@@ -1270,11 +1361,43 @@ namespace RedactEQ
             m_vm.isBusy = false;
         }
 
+        private void Detect_Pause_PB_Click(object sender, RoutedEventArgs e)
+        {
+            switch (m_vm.state)
+            {
+                case AppState.DETECTOR_RUNNING:
+                    if (m_pauseTokenSource != null) m_pauseTokenSource.IsPaused = true;
+                    m_vm.state = AppState.READY;
+                    break;
+            }
+        }
 
+        private void Track_Stop_PB_Click(object sender, RoutedEventArgs e)
+        {
+            switch (m_vm.state)
+            {
+                case AppState.TRACKER_RUNNING:
+                    m_activeBackgroundTask = BackgroundTaskRunning.NONE;
+                    m_manualAutoStep = 0;
+                    m_vm.state = AppState.WAITING_FOR_TRACKING_REGION_SELECTION;
+                    break;                    
+            }
+        }
+
+        private void Player_Pause_PB_Click(object sender, RoutedEventArgs e)
+        {
+            switch (m_vm.state)
+            {
+                case AppState.PLAYER_RUNNING:
+                    if (m_pauseTokenSource != null) m_pauseTokenSource.IsPaused = true;
+                    m_vm.state = AppState.READY;
+                    break;
+            }
+        }
 
         private void FrameEditsListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            m_vm.RedrawRedactionBoxes();
+            RedrawRedactionBoxes();
         }
 
 
@@ -1288,18 +1411,71 @@ namespace RedactEQ
                 if (m_tracker.Update(m_vm.lastImageByteArray, m_vm.width, m_vm.height, ref roiX, ref roiY, ref roiW, ref roiH))
                 {
                     m_editsDB.AddFrameEdit(timestamp, FRAME_EDIT_TYPE.TRACKING_REDACTION, new VideoTools.BoundingBox(roiX, roiY, roiX + roiW - 1, roiY + roiH - 1));
-                    m_vm.RedrawRedactionBoxes();
+                    DrawTrackingBox(roiX, roiY, roiX + roiW - 1, roiY + roiH - 1);
                 }
                 else
                 {
                     // tracker failed
-                    Track_Enable_RegionPick_PB.IsChecked = false;
+                    m_vm.state = AppState.WAITING_FOR_TRACKING_REGION_SELECTION;
                     m_activeBackgroundTask = BackgroundTaskRunning.NONE;
+                    m_manualAutoStep = 0;
                 }
             }
         }
 
 
+
+
+        public void RedrawRedactionBoxes()
+        {
+            if (m_vm.imageOverlay != null)
+            {
+                m_vm.imageOverlay.Clear();
+
+                if(m_vm.displayMode == DisplayMode.BOXES)
+                {
+                    foreach (FrameEdit fe in m_vm.redactions)
+                    {
+                        if (fe == m_vm.selectedRedaction)
+                            m_vm.imageOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, m_vm.selectedFillColor);
+                        else
+                            m_vm.imageOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, m_vm.fillColor);
+                    }
+                }
+                else if(m_vm.displayMode == DisplayMode.REDACTED)
+                {
+                    int w = m_vm.width;
+                    int h = m_vm.height;
+                    int byteCount = w * h * 3;
+                    byte[] redactedImage = new byte[byteCount];
+                    GetRedactedImage(m_vm.lastImageByteArray, w, h, m_vm.redactions, 16, out redactedImage);
+                    m_vm.SetImage(w, h, 3, redactedImage);
+                }
+            }
+        }
+
+        public void DrawRedactionBox(int x1, int y1, int x2, int y2)
+        {
+            m_vm.imageOverlay.FillRectangle(x1, y1, x2, y2, m_vm.fillColor);
+        }
+
+
+        public void DrawTrackingBox(int x1, int y1, int x2, int y2)
+        {
+            m_vm.imageOverlay.FillRectangle(x1, y1, x2, y2, m_vm.trackingFillColor);
+        }
+
+        public void DeleteSelectedRedaction(object obj)
+        {
+            m_vm.redactions.Remove(m_vm.selectedRedaction);
+            RedrawRedactionBoxes();
+        }
+
+        public void DeleteAnnotation(FrameEdit redaction)
+        {
+            m_vm.redactions.Remove(redaction);
+            RedrawRedactionBoxes();
+        }
 
 
 
@@ -1314,10 +1490,16 @@ namespace RedactEQ
         TRACKER_RUNNING,
         PLAYER_RUNNING,
         WAITING_FOR_TRACKING_REGION_SELECTION,
-        READY_TO_TRACK
+        READY_TO_TRACK,
+        EXPORTING
     }
 
-
+    public enum DisplayMode
+    {
+        ORIGINAL,
+        BOXES,
+        REDACTED
+    }
 
     public class MainViewModel : INotifyPropertyChanged
     {
@@ -1329,6 +1511,18 @@ namespace RedactEQ
             {
                 _state = value; if (PropertyChanged != null)
                     PropertyChanged(this, new PropertyChangedEventArgs("state"));
+                SetState();
+            }
+        }
+
+        private DisplayMode _displayMode;
+        public DisplayMode displayMode
+        {
+            get { return _displayMode; }
+            set
+            {
+                _displayMode = value; if (PropertyChanged != null)
+                    PropertyChanged(this, new PropertyChangedEventArgs("displayMode"));
                 SetState();
             }
         }
@@ -1358,6 +1552,15 @@ namespace RedactEQ
             set { _detector_runPB_isEnabled = value; if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("detector_runPB_isEnabled")); }
         }
 
+
+        private bool _detector_pausePB_isEnabled;
+        public bool detector_pausePB_isEnabled
+        {
+            get { return _detector_pausePB_isEnabled; }
+            set { _detector_pausePB_isEnabled = value; if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("detector_pausePB_isEnabled")); }
+        }
+
+
         private bool _track_enable_tracking_ToggleButton_isEnabled;
         public bool track_enable_tracking_ToggleButton_isEnabled
         {
@@ -1379,6 +1582,13 @@ namespace RedactEQ
             set { _track_runPB_isEnabled = value; if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("track_runPB_isEnabled")); }
         }
 
+        private bool _track_stopPB_isEnabled;
+        public bool track_stopPB_isEnabled
+        {
+            get { return _track_stopPB_isEnabled; }
+            set { _track_stopPB_isEnabled = value; if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("track_stopPB_isEnabled")); }
+        }
+
         private bool _player_playPB_isEnabled;
         public bool player_playPB_isEnabled
         {
@@ -1386,11 +1596,19 @@ namespace RedactEQ
             set { _player_playPB_isEnabled = value; if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("player_playPB_isEnabled")); }
         }
 
-        private bool _player_mode_GroupBox_isEnabled;
-        public bool player_mode_GroupBox_isEnabled
+        private bool _player_pausePB_isEnabled;
+        public bool player_pausePB_isEnabled
         {
-            get { return _player_mode_GroupBox_isEnabled; }
-            set { _player_mode_GroupBox_isEnabled = value; if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("player_mode_GroupBox_isEnabled")); }
+            get { return _player_pausePB_isEnabled; }
+            set { _player_pausePB_isEnabled = value; if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("player_pausePB_isEnabled")); }
+        }
+
+
+        private bool _display_mode_GroupBox_isEnabled;
+        public bool display_mode_GroupBox_isEnabled
+        {
+            get { return _display_mode_GroupBox_isEnabled; }
+            set { _display_mode_GroupBox_isEnabled = value; if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("display_mode_GroupBox_isEnabled")); }
         }
 
         private bool _frame_edits_ListBox_isEnabled;
@@ -1458,11 +1676,14 @@ namespace RedactEQ
                 case AppState.MP4_NOT_SET:
                     detector_detectPB_isEnabled = false;
                     detector_runPB_isEnabled = false;
+                    detector_pausePB_isEnabled = false;
                     track_enable_tracking_ToggleButton_isEnabled = false;
                     track_stepPB_isEnabled = false;
                     track_runPB_isEnabled = false;
+                    track_stopPB_isEnabled = false;
                     player_playPB_isEnabled = false;
-                    player_mode_GroupBox_isEnabled = false;
+                    player_pausePB_isEnabled = false;
+                    display_mode_GroupBox_isEnabled = false;
                     frame_edits_ListBox_isEnabled = false;
                     videoNavigator_isEnabled = false;
                     nav_goto_startPB_isEnabled = false;
@@ -1474,11 +1695,14 @@ namespace RedactEQ
                 case AppState.READY:
                     detector_detectPB_isEnabled = true;
                     detector_runPB_isEnabled = true;
+                    detector_pausePB_isEnabled = false;
                     track_enable_tracking_ToggleButton_isEnabled = true;
                     track_stepPB_isEnabled = false;
                     track_runPB_isEnabled = false;
+                    track_stopPB_isEnabled = false;
                     player_playPB_isEnabled = true;
-                    player_mode_GroupBox_isEnabled = true;
+                    player_pausePB_isEnabled = false;
+                    display_mode_GroupBox_isEnabled = true;
                     frame_edits_ListBox_isEnabled = true;
                     videoNavigator_isEnabled = true;
                     nav_goto_startPB_isEnabled = true;
@@ -1490,11 +1714,14 @@ namespace RedactEQ
                 case AppState.DETECTOR_RUNNING:
                     detector_detectPB_isEnabled = false;
                     detector_runPB_isEnabled = false;
+                    detector_pausePB_isEnabled = true;
                     track_enable_tracking_ToggleButton_isEnabled = false;
                     track_stepPB_isEnabled = false;
                     track_runPB_isEnabled = false;
+                    track_stopPB_isEnabled = false;
                     player_playPB_isEnabled = false;
-                    player_mode_GroupBox_isEnabled = false;
+                    player_pausePB_isEnabled = false;
+                    display_mode_GroupBox_isEnabled = false;
                     frame_edits_ListBox_isEnabled = false;
                     videoNavigator_isEnabled = false;
                     nav_goto_startPB_isEnabled = false;
@@ -1506,11 +1733,14 @@ namespace RedactEQ
                 case AppState.TRACKER_RUNNING:
                     detector_detectPB_isEnabled = false;
                     detector_runPB_isEnabled = false;
+                    detector_pausePB_isEnabled = false;
                     track_enable_tracking_ToggleButton_isEnabled = false;
                     track_stepPB_isEnabled = false;
                     track_runPB_isEnabled = false;
+                    track_stopPB_isEnabled = true;
                     player_playPB_isEnabled = false;
-                    player_mode_GroupBox_isEnabled = false;
+                    player_pausePB_isEnabled = false;
+                    display_mode_GroupBox_isEnabled = false;
                     frame_edits_ListBox_isEnabled = false;
                     videoNavigator_isEnabled = false;
                     nav_goto_startPB_isEnabled = false;
@@ -1522,11 +1752,14 @@ namespace RedactEQ
                 case AppState.PLAYER_RUNNING:
                     detector_detectPB_isEnabled = false;
                     detector_runPB_isEnabled = false;
+                    detector_pausePB_isEnabled = false;
                     track_enable_tracking_ToggleButton_isEnabled = false;
                     track_stepPB_isEnabled = false;
                     track_runPB_isEnabled = false;
+                    track_stopPB_isEnabled = false;
                     player_playPB_isEnabled = false;
-                    player_mode_GroupBox_isEnabled = false;
+                    player_pausePB_isEnabled = true;
+                    display_mode_GroupBox_isEnabled = false;
                     frame_edits_ListBox_isEnabled = false;
                     videoNavigator_isEnabled = false;
                     nav_goto_startPB_isEnabled = false;
@@ -1538,11 +1771,14 @@ namespace RedactEQ
                 case AppState.WAITING_FOR_TRACKING_REGION_SELECTION:
                     detector_detectPB_isEnabled = false;
                     detector_runPB_isEnabled = false;
+                    detector_pausePB_isEnabled = false;
                     track_enable_tracking_ToggleButton_isEnabled = true;
                     track_stepPB_isEnabled = false;
                     track_runPB_isEnabled = false;
+                    track_stopPB_isEnabled = false;
                     player_playPB_isEnabled = false;
-                    player_mode_GroupBox_isEnabled = false;
+                    player_pausePB_isEnabled = false;
+                    display_mode_GroupBox_isEnabled = false;
                     frame_edits_ListBox_isEnabled = false;
                     videoNavigator_isEnabled = false;
                     nav_goto_startPB_isEnabled = false;
@@ -1554,11 +1790,14 @@ namespace RedactEQ
                 case AppState.READY_TO_TRACK:
                     detector_detectPB_isEnabled = false;
                     detector_runPB_isEnabled = false;
+                    detector_pausePB_isEnabled = false;
                     track_enable_tracking_ToggleButton_isEnabled = true;
                     track_stepPB_isEnabled = true;
                     track_runPB_isEnabled = true;
+                    track_stopPB_isEnabled = false;
                     player_playPB_isEnabled = false;
-                    player_mode_GroupBox_isEnabled = false;
+                    player_pausePB_isEnabled = false;
+                    display_mode_GroupBox_isEnabled = false;
                     frame_edits_ListBox_isEnabled = false;
                     videoNavigator_isEnabled = false;
                     nav_goto_startPB_isEnabled = false;
@@ -1806,17 +2045,17 @@ namespace RedactEQ
             }
         }
 
-        public void DeleteSelectedRedaction(object obj)
-        {
-            redactions.Remove(selectedRedaction);
-            RedrawRedactionBoxes();
-        }
+        //public void DeleteSelectedRedaction(object obj)
+        //{
+        //    redactions.Remove(selectedRedaction);
+        //    RedrawRedactionBoxes();
+        //}
 
-        public void DeleteAnnotation(FrameEdit redaction)
-        {
-            redactions.Remove(redaction);            
-            RedrawRedactionBoxes();
-        }
+        //public void DeleteAnnotation(FrameEdit redaction)
+        //{
+        //    redactions.Remove(redaction);            
+        //    RedrawRedactionBoxes();
+        //}
 
         private Color _fillColor;
         public Color fillColor
@@ -1834,23 +2073,42 @@ namespace RedactEQ
 
 
 
-
-        public void RedrawRedactionBoxes()
+        private Color _trackingFillColor;
+        public Color trackingFillColor
         {
-            if (imageOverlay != null)
-            {
-                imageOverlay.Clear();
-
-                foreach (FrameEdit fe in redactions)
-                {
-                    if (fe == selectedRedaction)
-                        imageOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, selectedFillColor);
-                    else
-                        imageOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, fillColor);
-                }
-            }
+            get { return _trackingFillColor; }
+            set { _trackingFillColor = value; PropertyChanged(this, new PropertyChangedEventArgs("trackingFillColor")); }
         }
 
+
+
+
+        //public void RedrawRedactionBoxes()
+        //{
+        //    if (imageOverlay != null)
+        //    {
+        //        imageOverlay.Clear();
+
+        //        foreach (FrameEdit fe in redactions)
+        //        {
+        //            if (fe == selectedRedaction)
+        //                imageOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, selectedFillColor);
+        //            else
+        //                imageOverlay.FillRectangle(fe.box.x1, fe.box.y1, fe.box.x2, fe.box.y2, fillColor);
+        //        }
+        //    }
+        //}
+
+        //public void DrawRedactionBox(int x1, int y1, int x2, int y2)
+        //{
+        //    imageOverlay.FillRectangle(x1, y1, x2, y2, fillColor);
+        //}
+
+
+        //public void DrawTrackingBox(int x1, int y1, int x2, int y2)
+        //{
+        //    imageOverlay.FillRectangle(x1, y1, x2, y2, trackingFillColor);
+        //}
 
 
         public void SetImage(int Width, int Height, int Depth, byte[] data)
@@ -1879,7 +2137,7 @@ namespace RedactEQ
                 imageOverlay = BitmapFactory.New(width, height);
             }
 
-            imageOverlay.Clear();
+            //imageOverlay.Clear();
             Int32Rect rect = new Int32Rect(0, 0, imageDisplay.PixelWidth, imageDisplay.PixelHeight);
             imageDisplay.Lock();
             imageDisplay.WritePixels(rect, data, imageDisplay.PixelWidth * depth, 0);
@@ -1904,13 +2162,17 @@ namespace RedactEQ
 
             state = AppState.MP4_NOT_SET;
 
-            _deleteRedactionCommand = new WPFTools.RelayCommand(DeleteSelectedRedaction);
+    //        _deleteRedactionCommand = new WPFTools.RelayCommand(DeleteSelectedRedaction);
 
             _fillColor = Color.FromArgb(0x55, 0xff, 0x00, 0x00);
 
             _selectedFillColor = Color.FromArgb(0x55, 0xf9, 0xff, 0x33);
 
+            _trackingFillColor = Color.FromArgb(0x55, 0x00, 0xff, 0x00);
+
             isBusy = false;
+
+            displayMode = DisplayMode.ORIGINAL;
         }
 
 

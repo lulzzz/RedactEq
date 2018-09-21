@@ -11,7 +11,7 @@ using System.Windows;
 
 namespace RedactEQ
 {
-    class CudaTools : IDisposable
+    public class CudaTools : IDisposable
     {
 
         private IntPtr cudaTools = IntPtr.Zero;
