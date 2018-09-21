@@ -20,6 +20,7 @@ using Equature.Integration;
 using System.Windows.Data;
 using System.Globalization;
 using System.Collections.Concurrent;
+using WPFTools;
 
 namespace RedactEQ
 {
@@ -47,7 +48,6 @@ namespace RedactEQ
         CancellationTokenSource m_cancelTokenSource;
         WPFTools.PauseTokenSource m_pauseTokenSource;
         TaskScheduler m_uiTask;
-        int m_analysisWidth, m_analysisHeight;
 
         private CudaTools m_cudaTools;
 
@@ -79,9 +79,6 @@ namespace RedactEQ
             DataContext = m_vm;
             m_vm.currentFrameIndex = 0;
 
-            m_analysisHeight = 480;
-            m_analysisWidth = 640;
-
             m_manualAutoStep = 0;
             
             m_uiTask = TaskScheduler.FromCurrentSynchronizationContext();
@@ -94,9 +91,9 @@ namespace RedactEQ
             m_cudaTools.Init();
             m_dnnLoaded = false;
 
+            GlobalVars.LoadSettings();
 
-            bool success = InitDNN("D:/tensorflow/pretrained_models/Golden/1/frozen_inference_graph.pb",
-                   "D:/tensorflow/pretrained_models/Golden/1/face_label_map.pbtxt");
+            bool success = InitDNN(GlobalVars.dnn_modelFile, GlobalVars.dnn_catalogFile);
 
             if(!success)
             {
@@ -137,15 +134,22 @@ namespace RedactEQ
         public bool InitDNN(string modelFile, string catalogFile)
         {
             bool success = true;
-            //string _modelPath = "D:/tensorflow/pretrained_models/Golden/1/frozen_inference_graph.pb";
-            //string _catalogPath = "D:/tensorflow/pretrained_models/Golden/1/label_map.pbtxt";
-            //string _imageFile = "D:/Pictures/Kids_2.jpg";
+
+            if(!File.Exists(modelFile))
+            {
+                MessageBox.Show("Model File does not exist: " + modelFile, "Error Initializing Neural Net", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
+
+            if (!File.Exists(catalogFile))
+            {
+                MessageBox.Show("Catalog File does not exist: " + catalogFile, "Error Initializing Neural Net", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
 
             try
             {
                 Dictionary<int, string> classes = new Dictionary<int, string>();
-
-                //LoadImageFromFile(_imageFile);
 
                 List<CatalogItem> items = CatalogUtil.ReadCatalogItems1(catalogFile);
                 if (items.Count > 0)
@@ -165,7 +169,8 @@ namespace RedactEQ
                     m_nms = new NonMaximumSuppression();
                     m_nms.Init();
 
-                    m_pipeline = m_engine.CreateDNNPipeline(modelFile, classes, m_editsDB, m_analysisWidth, m_analysisHeight, TFDataType.UInt8, 0.50f, null, null,
+                    m_pipeline = m_engine.CreateDNNPipeline(modelFile, classes, m_editsDB, GlobalVars.decodeWidth, GlobalVars.decodeHeight, 
+                                                            TFDataType.UInt8, 0.50f, null, null,
                                                             m_uiTask, m_cancelTokenSource.Token);
                 }
                 else
@@ -694,8 +699,8 @@ namespace RedactEQ
 
                     await Task.Run(() =>
                     {
-                        int w = 640;
-                        int h = 480;
+                        int w = GlobalVars.decodeWidth;
+                        int h = GlobalVars.decodeHeight;
                         int d = 3;
                         byte[] data = new byte[w * h * d];
                         List<DNNTools.BoundingBox> boxList = m_engine.EvalImage(data, w, h, d, w, h, 0.70f);
@@ -715,8 +720,6 @@ namespace RedactEQ
 
         private async void Detect_Run_PB_Click(object sender, RoutedEventArgs e)
         {
-            Task t1;
-
             if (m_vm.state == AppState.READY)
             {
                 if (!m_dnnLoaded)
@@ -726,8 +729,8 @@ namespace RedactEQ
 
                     await Task.Run(() =>
                     {
-                        int w = 640;
-                        int h = 480;
+                        int w = GlobalVars.decodeWidth;
+                        int h = GlobalVars.decodeHeight;
                         int d = 3;
                         byte[] data = new byte[w * h * d];
                         List<DNNTools.BoundingBox> boxList = m_engine.EvalImage(data, w, h, d, w, h, 0.70f);
@@ -751,7 +754,7 @@ namespace RedactEQ
                                 if (File.Exists(m_vm.mp4Filename))
                                 {
                                     m_vm.displayMode = DisplayMode.BOXES;
-                                    Detection_Start(m_vm.mp4Filename, 640, 480, false);
+                                    Detection_Start(m_vm.mp4Filename, GlobalVars.decodeWidth, GlobalVars.decodeHeight, false);
                                 }
                             break;
                         case BackgroundTaskRunning.DETECTOR:
@@ -970,7 +973,7 @@ namespace RedactEQ
                         if (m_vm.mp4Filename != null)
                             if (File.Exists(m_vm.mp4Filename))
                             {
-                                Player_Start(m_vm.mp4Filename, 640, 480, true);
+                                Player_Start(m_vm.mp4Filename, GlobalVars.decodeWidth, GlobalVars.decodeHeight, true);
                             }
                         break;
               
@@ -993,7 +996,9 @@ namespace RedactEQ
             m_vm.messageToUser = "Select Area to Track";
             //m_tracking = false;
             m_startingTrackingRect = new Int32Rect(0, 0, 0, 0);
-            m_vm.displayMode = DisplayMode.BOXES;           
+            m_vm.displayMode = DisplayMode.BOXES;
+
+            Track_GroupBox.Header = "Track (ON)";         
         }
 
         private void Track_Enable_RegionPick_PB_Unchecked(object sender, RoutedEventArgs e)
@@ -1001,6 +1006,8 @@ namespace RedactEQ
             m_vm.state = AppState.READY;
             //m_tracking = false;
             m_vm.messageToUser = "";
+
+            Track_GroupBox.Header = "Track (OFF)";
         }
 
         private void Nav_Goto_Start_PB_Click(object sender, RoutedEventArgs e)
@@ -1073,7 +1080,7 @@ namespace RedactEQ
 
                         }));
 
-                        success = m_videoCache.Init(640, 480);
+                        success = m_videoCache.Init(GlobalVars.decodeWidth, GlobalVars.decodeHeight);
 
                         if(success)
                         {
@@ -1137,7 +1144,8 @@ namespace RedactEQ
             
             if(result == MessageBoxResult.Yes)
             {
-                ExportingDialog dlg = new ExportingDialog(this, inputFilename, outputFilename, 0.0, endTime, frameCount, 640, 480, m_editsDB, m_cudaTools);
+                ExportingDialog dlg = new ExportingDialog(this, inputFilename, outputFilename, 0.0, endTime, frameCount, 
+                    GlobalVars.decodeWidth, GlobalVars.decodeHeight, m_editsDB, m_cudaTools);
 
                 dlg.ShowDialog();
             }
@@ -1154,8 +1162,8 @@ namespace RedactEQ
 
                 await Task.Run(() =>
                 {
-                    int w = 640;
-                    int h = 480;
+                    int w = GlobalVars.decodeWidth;
+                    int h = GlobalVars.decodeHeight;
                     int d = 3;
                     byte[] data = new byte[w * h * d];
                     List<DNNTools.BoundingBox> boxList = m_engine.EvalImage(data, w, h, d, w, h, 0.70f);
@@ -1185,11 +1193,15 @@ namespace RedactEQ
 
         private void Menu_Edit_ClearEditsDB_Click(object sender, RoutedEventArgs e)
         {
-            MessageBoxResult result = MessageBox.Show("Are you sure you want to delete ALL edits for this video?", "Delete ALL Edits", MessageBoxButton.YesNo, MessageBoxImage.Question );
+            MessageBoxResult result = MessageBox.Show("Are you sure you want to delete ALL edits for this video?", 
+                "Delete ALL Edits", MessageBoxButton.YesNo, MessageBoxImage.Question );
             if(result == MessageBoxResult.Yes)
             {
-                m_editsDB.RemoveAllEdits();
-                RedrawRedactionBoxes();
+                if (m_editsDB != null)
+                {
+                    m_editsDB.RemoveAllEdits();
+                    RedrawRedactionBoxes();
+                }
             }            
         }
 

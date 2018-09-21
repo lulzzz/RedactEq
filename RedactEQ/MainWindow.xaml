@@ -94,7 +94,7 @@
                     </Grid>
             </GroupBox>
 
-            <GroupBox Grid.Column="1" x:Name="Track_GroupBox" Width="200" Height="70" Header="Track"
+            <GroupBox Grid.Column="1" x:Name="Track_GroupBox" Width="200" Height="70" Header="Track (OFF)"
                       HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
                     <Grid.ColumnDefinitions>
@@ -104,29 +104,34 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <ToggleButton Grid.Column="0" x:Name="Track_Enable_RegionPick_PB" IsThreeState="False" 
-                                  IsChecked="{Binding trackingEnabled}" Width="24" Height="24"
+                                  IsChecked="{Binding trackingEnabled}" Width="36" Height="36"
                                   Margin="8,1,8,1"
                                   IsEnabled="{Binding track_enable_tracking_ToggleButton_isEnabled}"
                                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center" 
                                   Checked="Track_Enable_RegionPick_PB_Checked"
                                   Unchecked="Track_Enable_RegionPick_PB_Unchecked">
                         <ToggleButton.Content>
-                            <Image Source="Images/target.png" Width="16" Height="16" />
+                            <Image Source="Images/track.png" Width="32" Height="32" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </ToggleButton.Content>
                         <ToggleButton.Style>
                             <Style TargetType="{x:Type ToggleButton}">
                                 <Setter Property="Template">
                                     <Setter.Value>
                                         <ControlTemplate TargetType="ToggleButton">
-                                            <Border BorderBrush="{TemplateBinding BorderBrush}" Background="{TemplateBinding Background}">
+                                                <Grid>
+                                                    <Ellipse Fill="{TemplateBinding Background}" Width="36" Height="36" Stroke="Black"/>
+                                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Grid>
+
+                                                <!--<Border BorderBrush="{TemplateBinding BorderBrush}" Background="{TemplateBinding Background}">
                                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                            </Border>
+                                            </Border>-->
                                         </ControlTemplate>
                                     </Setter.Value>
                                 </Setter>
                                 <Style.Triggers>
                                     <Trigger Property="IsChecked" Value="True">
-                                        <Setter Property="Background" Value="Red" />
+                                        <Setter Property="Background" Value="YellowGreen" />
                                     </Trigger>
                                 </Style.Triggers>
                             </Style>
